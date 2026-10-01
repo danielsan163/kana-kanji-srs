@@ -1,0 +1,55 @@
+// Quick checks for answer grading: node test/grading.test.js
+global.window = { api: { saveProgress() {}, saveProgressSync() {}, loadProgress: async () => null } };
+require('../app/data/data.js');
+require('../app/js/kana.js');
+require('../app/js/srs.js');
+const S = window.SRS;
+let fail = 0;
+function t(id, prompt, ans, want) {
+  const it = S.byId.get(id);
+  const g = S.grade(it, prompt, ans);
+  const ok = g.result === want;
+  if (!ok) fail++;
+  console.log(ok ? 'ok  ' : 'FAIL', id, prompt, JSON.stringify(ans), '→', g.result, g.message || '');
+}
+(async () => {
+  await S.init();
+  t('kana:あ', 'reading', 'a', 'correct');
+  t('kana:し', 'reading', 'si', 'correct');
+  t('kana:し', 'reading', 'shi', 'correct');
+  t('kana:し', 'reading', 'chi', 'wrong');
+  t('kana:ツ', 'reading', 'tu', 'correct');
+  t('kana:を', 'reading', 'o', 'correct');
+  t('kana:ん', 'reading', 'n', 'correct');
+  t('kana:しゃ', 'reading', 'sya', 'correct');
+  t('kana:ティ', 'reading', 'ti', 'correct');
+  t('k:食', 'meaning', 'eat', 'correct');
+  t('k:食', 'meaning', 'food', 'correct');
+  t('k:食', 'meaning', 'drink', 'wrong');
+  t('k:食', 'meaning', 'shoku', 'retry');
+  t('k:食', 'on', 'ショク', 'correct');
+  t('k:食', 'on', 'しょく', 'correct');
+  t('k:食', 'on', 'た', 'retry');
+  t('k:食', 'kun', 'たべる', 'correct');
+  t('k:食', 'kun', 'た', 'correct');
+  t('k:食', 'kun', 'しょく', 'retry');
+  t('k:食', 'kun', 'のむ', 'wrong');
+  t('k:日', 'meaning', 'sun', 'correct');
+  t('k:日', 'meaning', 'day', 'correct');
+  t('v:食べる', 'meaning', 'to eat', 'correct');
+  t('v:食べる', 'meaning', 'eat', 'correct');
+  t('v:食べる', 'reading', 'たべる', 'correct');
+  t('v:食べる', 'reading', 'taberu', 'correct');
+  t('v:上', 'meaning', 'above', 'correct');
+  t('v:上', 'meaning', 'abov', 'correct');
+  t('v:上', 'meaning', 'on top of', 'correct');
+  t('v:行く', 'reading', 'ゆく', 'correct');
+  t('v:明日', 'reading', 'あした', 'correct');
+  const sent = S.items.find((i) => i.t === 'sentence' && i.tokens.some((x) => x[2] && x[0] === 'を'));
+  console.log(sent.c, S.sentenceReading(sent));
+  const r = S.sentenceReading(sent);
+  t(sent.id, 'reading', r, 'correct');
+  t(sent.id, 'reading', r.replace('を', 'お'), 'correct');
+  t(sent.id, 'reading', r + 'か', 'wrong');
+  console.log(fail ? `${fail} FAILED` : 'all passed');
+})();

@@ -1,0 +1,72 @@
+{
+  "name": "kana-kanji-srs",
+  "version": "1.0.0",
+  "description": "SRS study app for hiragana, katakana, kanji, vocabulary and phrases",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build-data": "node scripts/build-data.js && node scripts/build-examples.js",
+    "test": "node test/grading.test.js",
+    "dist": "electron-builder --win"
+  },
+  "keywords": [
+    "japanese",
+    "kanji",
+    "srs",
+    "hiragana",
+    "katakana",
+    "electron",
+    "jlpt"
+  ],
+  "author": "danielsan163",
+  "license": "GPL-3.0-only",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "kuromoji": "^0.1.2"
+  },
+  "productName": "Kana Kanji SRS",
+  "build": {
+    "appId": "local.kanakanjisrs.app",
+    "productName": "Kana Kanji SRS",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "build/icon.png",
+      "!scripts",
+      "!raw",
+      "!test"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Kana Kanji SRS",
+      "runAfterFinish": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danielsan163/kana-kanji-srs.git"
+  }
+}
