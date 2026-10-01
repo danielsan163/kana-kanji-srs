@@ -4,7 +4,7 @@ A WaniKani/Bunpro-style spaced-repetition app for Windows. It covers hiragana, k
 
 ## Install / run
 
-- **Install:** download `Kana Kanji SRS Setup 1.0.0.exe` from the [Releases page](https://github.com/danielsan163/kana-kanji-srs/releases), or build it yourself with `npm run dist` (output in `dist\`). It adds desktop and Start Menu shortcuts.
+- **Install:** download `Kana-Kanji-SRS-Setup-1.0.0.exe` from the [Releases page](https://github.com/danielsan163/kana-kanji-srs/releases), or build it yourself with `npm run dist` (output in `dist\`). It adds desktop and Start Menu shortcuts.
   - Windows SmartScreen may warn because the app isn't code-signed. Choose **More info → Run anyway**.
 - **Run from source:** `npm start`
 
