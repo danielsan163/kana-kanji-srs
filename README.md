@@ -90,6 +90,7 @@ The app's source code is licensed under the [GNU GPL v3](LICENSE). The bundled d
 | Phrases | [Tatoeba](https://tatoeba.org) | CC BY 2.0 FR |
 | Stroke order | [KanjiVG](https://kanjivg.tagaini.net) © Ulrich Apel | CC BY-SA 3.0 |
 
+| Pixel font (retro themes) | [Press Start 2P](https://github.com/codeman38/PressStart2P) © The Press Start 2P Project Authors | SIL OFL 1.1 |
 | Textbook font (web version) | [Klee One](https://github.com/fontworks-fonts/Klee) © The Klee Project Authors, via Fontsource | SIL OFL 1.1 |
 
 Phrase readings are generated with kuromoji.js.

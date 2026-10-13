@@ -1,6 +1,6 @@
 {
   "name": "kana-kanji-srs",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "SRS study app for hiragana, katakana, kanji, vocabulary and phrases",
   "main": "main.js",
   "scripts": {

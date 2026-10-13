@@ -12,11 +12,15 @@
   --ok: #16a34a;
   --bad: #dc2626;
   --radius: 10px;
+  --on-accent: #fff;      /* text on accent-coloured buttons */
+  --lesson-c: #e5007f;    /* dashboard Lessons card */
+  --review-c: #0ea5e9;    /* dashboard Reviews card */
+  --pixel: "Press Start 2P", var(--ui);
   --jp: "Yu Gothic UI", "Yu Gothic", "Meiryo", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "MS Gothic", sans-serif;
   --jp-serif: "Yu Mincho", "YuMincho", "MS Mincho", serif;
   --ui: "Segoe UI", system-ui, sans-serif;
 }
-[data-theme="dark"] {
+[data-mode="dark"] {
   --bg: #16161d;
   --surface: #1f1f29;
   --surface-2: #2a2a36;
@@ -27,7 +31,7 @@
   --accent: #e5007f;
   --input-bg: #111118;
 }
-[data-theme="light"] {
+[data-mode="light"] {
   --bg: #f4f4f7;
   --surface: #ffffff;
   --surface-2: #eeeef3;
@@ -51,13 +55,13 @@ a { color: var(--kana); }
 /* ---------- top bar ---------- */
 .topbar { display: flex; align-items: center; gap: 18px; padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .brand { font-weight: 700; font-size: 17px; cursor: pointer; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-.brand-mark { font-family: var(--jp); background: var(--accent); color: #fff; border-radius: 7px; width: 30px; height: 30px; display: grid; place-items: center; }
+.brand-mark { font-family: var(--jp); background: var(--accent); color: var(--on-accent); border-radius: 7px; width: 30px; height: 30px; display: grid; place-items: center; }
 nav { display: flex; gap: 4px; flex: 1; }
 nav button { background: none; border: none; padding: 8px 14px; border-radius: 8px; color: var(--text-2); font-weight: 600; }
 nav button:hover { background: var(--surface-2); color: var(--text); }
 nav button.active { background: var(--surface-2); color: var(--text); }
 .badge { display: inline-block; min-width: 22px; padding: 1px 7px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 12px; margin-left: 4px; }
-.badge.hot { background: var(--accent); color: #fff; }
+.badge.hot { background: var(--accent); color: var(--on-accent); }
 .level-pill { background: var(--surface-2); padding: 6px 12px; border-radius: 20px; font-weight: 700; font-size: 13px; white-space: nowrap; }
 
 main { flex: 1; overflow-y: auto; padding: 24px; }
@@ -74,7 +78,7 @@ h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: v
 
 .btn { border: 1px solid var(--border); background: var(--surface-2); padding: 9px 16px; border-radius: 8px; font-weight: 600; }
 .btn:hover { filter: brightness(1.12); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
 .btn:disabled { opacity: .45; cursor: default; filter: none; }
 .btn.small { padding: 5px 10px; font-size: 13px; }
@@ -83,8 +87,8 @@ h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: v
 
 /* ---------- dashboard ---------- */
 .big-action { display: flex; flex-direction: column; justify-content: space-between; min-height: 150px; border: none; color: #fff; text-align: left; border-radius: var(--radius); padding: 20px; }
-.big-action.lessons { background: linear-gradient(135deg, #e5007f, #b3006b); }
-.big-action.reviews { background: linear-gradient(135deg, #0ea5e9, #0369a1); }
+.big-action.lessons { background: linear-gradient(135deg, var(--lesson-c), color-mix(in srgb, var(--lesson-c) 78%, black)); }
+.big-action.reviews { background: linear-gradient(135deg, var(--review-c), color-mix(in srgb, var(--review-c) 72%, black)); }
 .big-action:disabled { background: var(--surface-2); color: var(--text-3); cursor: default; }
 .big-action .count { font-size: 46px; font-weight: 800; line-height: 1; }
 .big-action .label { font-size: 18px; font-weight: 700; }
@@ -129,10 +133,10 @@ h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: v
 .quiz { max-width: 900px; margin: 0 auto; }
 .quiz-top { display: flex; gap: 16px; align-items: center; margin-bottom: 12px; color: var(--text-2); font-weight: 600; font-size: 14px; }
 .subject { border-radius: 14px; color: #fff; display: grid; place-items: center; min-height: 260px; padding: 24px; text-align: center; position: relative; }
-.subject.t-kana { background: linear-gradient(180deg, #19b0f0, #0284c7); }
-.subject.t-kanji { background: linear-gradient(180deg, #f0158f, #c0006a); }
-.subject.t-vocab { background: linear-gradient(180deg, #a92cf0, #7d12bd); }
-.subject.t-sentence { background: linear-gradient(180deg, #f09a10, #c47600); }
+.subject { --c: var(--kana); background: linear-gradient(180deg, color-mix(in srgb, var(--c) 90%, white), color-mix(in srgb, var(--c) 84%, black)); }
+.subject.t-kanji { --c: var(--kanji); }
+.subject.t-vocab { --c: var(--vocab); }
+.subject.t-sentence { --c: var(--sentence); }
 .subject .char { font-family: var(--jp); font-size: 130px; line-height: 1.1; }
 .subject .char.len-2 { font-size: 110px; }
 .subject .char.len-3 { font-size: 90px; }
@@ -233,8 +237,8 @@ mark.hl { background: none; color: var(--vocab-hl); font-weight: 700; border-bot
 .list-row.ref { cursor: default; }
 .list-row.ref:hover { filter: none; }
 .list-row .audio-btn { width: 28px; height: 28px; font-size: 13px; background: var(--surface); }
-[data-theme="dark"] { --vocab-hl: #d08cff; --kanji-hl: #ff6ab8; }
-[data-theme="light"] { --vocab-hl: #7d12bd; --kanji-hl: #c0006a; }
+[data-mode="dark"] { --vocab-hl: #d08cff; --kanji-hl: #ff6ab8; }
+[data-mode="light"] { --vocab-hl: #7d12bd; --kanji-hl: #c0006a; }
 .furi-toggle { text-transform: none; letter-spacing: 0; color: var(--text); }
 
 /* mnemonics */
@@ -399,3 +403,93 @@ mark.hl { background: none; color: var(--vocab-hl); font-weight: 700; border-bot
 }
 .sync-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; max-width: 340px; }
 .sync-form .text-input { max-width: none; flex: none; }
+
+/* ---------- themes (Settings → Appearance) ----------
+   data-mode (dark/light) gives the base palette; data-theme layers a theme on top.
+   Each theme recolours surfaces, accent, item types and SRS stages. */
+[data-theme="shinji"] { /* Eva Unit-01: purple and green */
+  --bg: #1a1426; --surface: #231b33; --surface-2: #2f2545; --border: #3d3158; --input-bg: #120e1c;
+  --text: #efeaf7; --text-2: #b7abcf; --text-3: #85799e;
+  --accent: #8be04e; --on-accent: #16260a; --lesson-c: #7b4bd1; --review-c: #4f9e2a;
+  --kana: #4f7bd9; --kanji: #7b4bd1; --vocab: #3d9e2f; --sentence: #c46a1a;
+  --st-lesson: #85799e; --st-apprentice: #5fb82e; --st-guru: #8a5ad6; --st-master: #4f7bd9; --st-enlightened: #2fa58f; --st-burned: #5a5070;
+  --vocab-hl: #a8ef74; --kanji-hl: #b892ff;
+}
+[data-theme="asuka"] { /* Eva Unit-02: red and orange */
+  --bg: #1c1210; --surface: #271815; --surface-2: #35201b; --border: #472b24; --input-bg: #140c0a;
+  --text: #f7ece8; --text-2: #cdb3aa; --text-3: #9a7f76;
+  --accent: #e8432f; --on-accent: #fff; --lesson-c: #e8432f; --review-c: #e07a14;
+  --kana: #2f8fc9; --kanji: #d23a28; --vocab: #c9661a; --sentence: #a8862a;
+  --st-lesson: #9a7f76; --st-apprentice: #e8432f; --st-guru: #e07a14; --st-master: #b8901c; --st-enlightened: #2f96b9; --st-burned: #5b4440;
+  --vocab-hl: #ffab5c; --kanji-hl: #ff7a66;
+}
+[data-theme="rei"] { /* Eva Unit-00: blue and white, light */
+  --bg: #eef3f8; --surface: #ffffff; --surface-2: #e2eaf3; --border: #c9d6e4; --input-bg: #ffffff;
+  --text: #16233a; --text-2: #4a5b78; --text-3: #7d8ca6;
+  --accent: #2f6fd6; --on-accent: #fff; --lesson-c: #2f6fd6; --review-c: #2a9690;
+  --kana: #2f6fd6; --kanji: #5b4fc4; --vocab: #2a8f8a; --sentence: #c98a0e;
+  --st-lesson: #7d8ca6; --st-apprentice: #2f6fd6; --st-guru: #5b4fc4; --st-master: #2a9690; --st-enlightened: #c98a0e; --st-burned: #8a96a8;
+  --vocab-hl: #1f5bbf; --kanji-hl: #4a3fb0;
+}
+[data-theme="nes"] { /* NES: dark grey, black and red */
+  --bg: #1e1e1e; --surface: #2a2a2a; --surface-2: #363636; --border: #4a4a4a; --input-bg: #141414;
+  --text: #e8e8e8; --text-2: #b0b0b0; --text-3: #808080;
+  --accent: #d22c2c; --on-accent: #fff; --lesson-c: #d22c2c; --review-c: #2a7fd4;
+  --kana: #2a7fd4; --kanji: #d22c2c; --vocab: #2e9a3a; --sentence: #c88a00;
+  --st-lesson: #808080; --st-apprentice: #d22c2c; --st-guru: #2a7fd4; --st-master: #2e9a3a; --st-enlightened: #d89a00; --st-burned: #6a6a6a;
+  --vocab-hl: #5fd06a; --kanji-hl: #ff6b6b;
+  --radius: 3px;
+}
+[data-theme="snes"] { /* SNES (US): light grey and purple, light */
+  --bg: #e4e2ea; --surface: #f4f3f7; --surface-2: #dcd9e6; --border: #c3bfd1; --input-bg: #ffffff;
+  --text: #2a2638; --text-2: #57516e; --text-3: #8a85a0;
+  --accent: #5b4a9b; --on-accent: #fff; --lesson-c: #5b4a9b; --review-c: #7a68c4;
+  --kana: #2f6fb0; --kanji: #5b4a9b; --vocab: #7a68c4; --sentence: #8a5a9b;
+  --st-lesson: #8a85a0; --st-apprentice: #7a68c4; --st-guru: #4b3b8f; --st-master: #2f6fb0; --st-enlightened: #8c80c8; --st-burned: #9a96a8;
+  --vocab-hl: #5b4a9b; --kanji-hl: #3e2f80;
+}
+[data-theme="sfc"] { /* Super Famicom: light grey with red, yellow, blue, green buttons, light */
+  --bg: #e6e5e8; --surface: #f6f6f7; --surface-2: #dcdbe0; --border: #c9c8ce; --input-bg: #ffffff;
+  --text: #2b2b30; --text-2: #5a5a63; --text-3: #8d8c93;
+  --accent: #d1342f; --on-accent: #fff; --lesson-c: #d1342f; --review-c: #2a5bd7;
+  --kana: #2a5bd7; --kanji: #d1342f; --vocab: #2e9e4a; --sentence: #d99a00;
+  --st-lesson: #8d8c93; --st-apprentice: #d1342f; --st-guru: #2a5bd7; --st-master: #2e9e4a; --st-enlightened: #d99a00; --st-burned: #8d8c93;
+  --vocab-hl: #1f8a3c; --kanji-hl: #b8231e;
+}
+[data-theme="sfc"] .big-action.reviews { background: linear-gradient(135deg, #2a5bd7, #2e9e4a); }
+[data-theme="snes"] .btn.primary, [data-theme="sfc"] .btn.primary { border-radius: 999px; }
+
+/* Retro themes: pixel font for headings, buttons and navigation (study text keeps the normal fonts) */
+[data-pixel="on"] :is(h1, h2, h3, nav button, .btn, .level-pill, .brand, .big-action .label, .quiz-top, .prompt-bar, .stage-chip, .badge, .type-tag) { font-family: var(--pixel); font-weight: 400; letter-spacing: 0; }
+[data-pixel="on"] h1 { font-size: 17px; line-height: 1.5; }
+[data-pixel="on"] h2 { font-size: 12px; line-height: 1.6; }
+[data-pixel="on"] h3 { font-size: 9px; }
+[data-pixel="on"] .btn { font-size: 10px; line-height: 1.6; }
+[data-pixel="on"] .btn.small { font-size: 9px; }
+[data-pixel="on"] nav button { font-size: 10px; }
+[data-pixel="on"] .level-pill, [data-pixel="on"] .stage-chip, [data-pixel="on"] .badge, [data-pixel="on"] .type-tag { font-size: 8px; }
+[data-pixel="on"] .brand { font-size: 11px; }
+[data-pixel="on"] .big-action .label { font-size: 14px; }
+[data-pixel="on"] .quiz-top, [data-pixel="on"] .prompt-bar { font-size: 10px; line-height: 1.8; }
+[data-pixel="on"] .prompt-bar .hint { font-family: var(--ui); }
+@media (max-width: 700px) { [data-pixel="on"] nav button { font-size: 7px; } }
+
+/* Evangelion themes: heavy serif headings, like the show's title cards */
+[data-eva="on"] :is(h1, h2, .big-action .label, .brand-name) {
+  font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Noto Serif JP", "Times New Roman", serif;
+  font-weight: 800; letter-spacing: -0.01em; transform: scaleY(1.08); transform-origin: left bottom;
+}
+[data-eva="on"] h1 { font-size: 27px; }
+
+/* theme picker */
+.theme-grid { --sel: var(--text); display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+.theme-card { background: var(--bg); color: var(--text); border: 2px solid var(--border); border-radius: 10px; padding: 10px; text-align: left; font: inherit; }
+.theme-card.selected { outline: 3px solid var(--sel, #e5007f); outline-offset: 2px; }
+.theme-card .tc-name { font-weight: 700; font-size: 14px; }
+.theme-card .tc-sub { font-size: 11px; color: var(--text-2); }
+.theme-card .tc-row { display: flex; gap: 6px; align-items: center; margin: 8px 0; }
+.theme-card .tc-tile { width: 32px; height: 32px; border-radius: 6px; background: var(--kanji); color: #fff; display: grid; place-items: center; font-family: var(--jp); font-size: 18px; }
+.theme-card .tc-btn { background: var(--accent); color: var(--on-accent); border-radius: 6px; padding: 4px 8px; font-size: 11px; font-weight: 700; }
+.theme-card .tc-stages { display: flex; gap: 3px; }
+.theme-card .tc-stages i { flex: 1; height: 6px; border-radius: 2px; }
+.theme-card.split { background: linear-gradient(135deg, #16161d 50%, #f4f4f7 50%); }

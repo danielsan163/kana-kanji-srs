@@ -36,7 +36,7 @@
 
   // ------------------------------------------------------------------ state
   // Settings that belong to one device and never sync (the phone can use a different theme or voice)
-  const DEVICE_SETTINGS = ['theme', 'jpFont', 'voice', 'notifications', 'closeToTray', 'openAtLogin'];
+  const DEVICE_SETTINGS = ['theme', 'jpFont', 'pixelFont', 'voice', 'notifications', 'closeToTray', 'openAtLogin'];
   // Each device keeps its own daily counts (dayLog) so totals add up correctly after syncing
   const deviceId = (() => {
     try {
@@ -54,7 +54,7 @@
       epoch: now,    // changes on reset/import; synced devices adopt the newest epoch instead of merging
       level: 1,
       settings: {
-        batchSize: 5, theme: 'dark', jpFont: 'print', autoplayAudio: true, exampleFurigana: true, voice: '', maxLessonsPerDay: 0,
+        batchSize: 5, theme: 'dark', jpFont: 'print', pixelFont: true, autoplayAudio: true, exampleFurigana: true, voice: '', maxLessonsPerDay: 0,
         reviewOrder: 'random', backToBack: false, notifications: true, closeToTray: true, openAtLogin: false,
       },
       // id -> { s: stage, u: unlockedAt, l: learnedAt, a: availableAt, b: burnedAt, c: correct, w: wrong,
