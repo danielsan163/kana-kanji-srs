@@ -11,7 +11,8 @@ const PRECACHE = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the phone's HTTP cache, so an update never picks up stale files
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
@@ -25,6 +26,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (url.searchParams.has('check')) return; // update checks always ask the server
   e.respondWith(caches.open(CACHE).then(async (cache) => {
     const hit = await cache.match(e.request, { ignoreSearch: true });
     if (hit) return hit;

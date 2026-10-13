@@ -10,6 +10,8 @@
 
 ### Changed
 - **The iPhone version's offline copy repairs itself** if something clears it, such as another site on the same github.io address.
+- **iPhone updates arrive reliably.** The app checks for a new version every time it comes to the front, not only on a fresh start, and always asks the server rather than a cached copy.
+- **Check for updates** button in Settings → What's new (iPhone), with a Force update fallback that reloads the app fresh without touching your progress.
 
 ## 1.1.0 (October 12, 2026)
 
