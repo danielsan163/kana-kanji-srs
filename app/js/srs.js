@@ -35,17 +35,39 @@
   }
 
   // ------------------------------------------------------------------ state
+  // Settings that belong to one device and never sync (the phone can use a different theme or voice)
+  const DEVICE_SETTINGS = ['theme', 'jpFont', 'voice', 'notifications', 'closeToTray', 'openAtLogin'];
+  // Each device keeps its own daily counts (dayLog) so totals add up correctly after syncing
+  const deviceId = (() => {
+    try {
+      let id = localStorage.getItem('kks-device');
+      if (!id) { id = Math.random().toString(36).slice(2, 10); localStorage.setItem('kks-device', id); }
+      return id;
+    } catch { return 'local'; }
+  })();
+
   function newState() {
+    const now = Date.now();
     return {
-      version: 1,
-      createdAt: Date.now(),
+      version: 2,
+      createdAt: now,
+      epoch: now,    // changes on reset/import; synced devices adopt the newest epoch instead of merging
       level: 1,
-      settings: { batchSize: 5, theme: 'dark', autoplayAudio: true, exampleFurigana: true, voice: '', maxLessonsPerDay: 0 },
-      items: {},     // id -> { s: stage, u: unlockedAt, l: learnedAt, a: availableAt, b: burnedAt, c: correct, w: wrong }
+      settings: {
+        batchSize: 5, theme: 'dark', jpFont: 'print', autoplayAudio: true, exampleFurigana: true, voice: '', maxLessonsPerDay: 0,
+        reviewOrder: 'random', backToBack: false, notifications: true, closeToTray: true, openAtLogin: false,
+      },
+      // id -> { s: stage, u: unlockedAt, l: learnedAt, a: availableAt, b: burnedAt, c: correct, w: wrong,
+      //        k: correct streak, lw: last wrong, mk: marked known, t: last changed (for sync) }
+      items: {},
       notes: {},     // id -> string
       synonyms: {},  // id -> [string]
-      days: {},      // 'YYYY-MM-DD' -> { reviews, correct, lessons }
-      levelLog: { 1: Date.now() },
+      days: {},      // 'YYYY-MM-DD' -> { reviews, correct, lessons }: all devices added up (rebuilt from dayLog)
+      dayLog: {},    // device -> 'YYYY-MM-DD' -> { reviews, correct, lessons }
+      mt: {},        // last-changed times for synced things that aren't items: 'n:<id>' notes, 'y:<id>' synonyms, settings, vacation
+      levelLog: { 1: now },
+      levelForced: {}, // level -> true when it was unlocked early with "Unlock level N now"
+      vacation: null,  // { since } while vacation mode is on
     };
   }
   let state = null;
@@ -53,14 +75,31 @@
   function migrate(s) {
     const base = newState();
     s.settings = Object.assign(base.settings, s.settings || {});
-    for (const k of ['items', 'notes', 'synonyms', 'days', 'levelLog']) s[k] = s[k] || base[k];
+    for (const k of ['items', 'notes', 'synonyms', 'days', 'levelLog', 'levelForced', 'mt']) s[k] = s[k] || base[k];
+    if (s.vacation === undefined) s.vacation = null;
     s.level = Math.min(Math.max(1, s.level || 1), MAX_LEVEL);
+    s.epoch = s.epoch || s.createdAt || Date.now();
+    // Before sync, daily counts were one shared table: they become this device's log
+    if (!s.dayLog) s.dayLog = { [deviceId]: JSON.parse(JSON.stringify(s.days)) };
+    s.days = sumDays(s.dayLog);
+    s.version = 2;
     return s;
+  }
+  function sumDays(dayLog) {
+    const out = {};
+    for (const log of Object.values(dayLog)) for (const [d, v] of Object.entries(log)) {
+      const o = out[d] || (out[d] = { reviews: 0, correct: 0, lessons: 0 });
+      o.reviews += v.reviews || 0; o.correct += v.correct || 0; o.lessons += v.lessons || 0;
+    }
+    return out;
   }
 
   let saveTimer = null;
+  let changeListener = null;
+  let quiet = false; // true while applying synced data, so it doesn't count as a new local change
   function save(immediate) {
     clearTimeout(saveTimer);
+    if (changeListener && !quiet) changeListener();
     if (immediate) return window.api.saveProgress(state);
     saveTimer = setTimeout(() => window.api.saveProgress(state), 400);
   }
@@ -70,9 +109,30 @@
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
+  /** Today's totals across all synced devices (read-only; use bumpDay to count something). */
   function dayStats() {
+    return state.days[today()] || { reviews: 0, correct: 0, lessons: 0 };
+  }
+  function bumpDay(field) {
     const k = today();
-    return (state.days[k] = state.days[k] || { reviews: 0, correct: 0, lessons: 0 });
+    const mine = (state.dayLog[deviceId] = state.dayLog[deviceId] || {});
+    for (const o of [mine[k] || (mine[k] = { reviews: 0, correct: 0, lessons: 0 }), state.days[k] || (state.days[k] = { reviews: 0, correct: 0, lessons: 0 })]) o[field]++;
+  }
+  const touch = (key) => { state.mt[key] = Date.now(); };
+  function setNote(id, text) {
+    if (text.trim()) state.notes[id] = text; else delete state.notes[id];
+    touch('n:' + id);
+    save();
+  }
+  function setSynonyms(id, list) {
+    if (list.length) state.synonyms[id] = list; else delete state.synonyms[id];
+    touch('y:' + id);
+    save();
+  }
+  function setSetting(key, value) {
+    state.settings[key] = value;
+    if (!DEVICE_SETTINGS.includes(key)) touch('settings');
+    save();
   }
 
   const prog = (id) => state.items[id];
@@ -103,7 +163,7 @@
     for (let l = 1; l <= state.level; l++) {
       for (const it of byLevel.get(l)) {
         if (state.items[it.id] || !prerequisitesMet(it)) continue;
-        state.items[it.id] = { s: 0, u: now, c: 0, w: 0 };
+        state.items[it.id] = { s: 0, u: now, c: 0, w: 0, t: now };
         unlocked.push(it);
       }
     }
@@ -115,12 +175,73 @@
     if (state.level >= MAX_LEVEL) return;
     state.level++;
     state.levelLog[state.level] = state.levelLog[state.level] || Date.now();
+    state.levelForced[state.level] = true;
     refreshUnlocks();
+    save(true);
+  }
+
+  // ------------------------------------------------------------------ level-up estimate
+  /**
+   * Earliest time the current level can be passed if every review from now on is correct:
+   * project each gating item's Guru time from its stage and next review, then take the one
+   * at the 90% threshold position. Returns null when the level is already passable or on vacation.
+   */
+  function levelUpEstimate(now = Date.now()) {
+    if (state.vacation) return null;
+    const lp = levelProgress(state.level);
+    if (lp.done) return null;
+    const times = [];
+    for (const it of gatingItems(state.level)) {
+      const p = state.items[it.id];
+      if (p && p.s >= GURU) continue;
+      let stage, t;
+      if (!p || p.s === 0) { stage = 1; t = nextAvailable(1, now); } // lesson done now
+      else { stage = p.s; t = Math.max(p.a, now); }
+      while (stage < 4) { stage++; t = nextAvailable(stage, t); }
+      times.push(t);
+    }
+    times.sort((a, b) => a - b);
+    const idx = lp.needed - lp.guru - 1;
+    return idx >= 0 && idx < times.length ? times[idx] : null;
+  }
+
+  // ------------------------------------------------------------------ mark known / vacation
+  /** Skip an item you already know straight to Guru I (first check-up review in a week). */
+  function markKnown(id) {
+    const now = Date.now();
+    const p = state.items[id];
+    if (!p || p.s >= GURU) return [];
+    p.s = GURU;
+    p.l = p.l || now;
+    p.a = nextAvailable(GURU, now);
+    p.mk = now;
+    p.t = now;
+    const unlocked = refreshUnlocks();
+    save(true);
+    return unlocked;
+  }
+  function startVacation() {
+    if (state.vacation) return;
+    state.vacation = { since: Date.now() };
+    touch('vacation');
+    save(true);
+  }
+  /** Shift every pending review by the time spent away, so nothing piles up. */
+  function endVacation() {
+    if (!state.vacation) return;
+    const now = Date.now();
+    const away = now - state.vacation.since;
+    for (const p of Object.values(state.items)) {
+      if (p.s >= 1 && p.s < BURNED && p.a > state.vacation.since) { p.a += away; p.t = now; }
+    }
+    state.vacation = null;
+    touch('vacation');
     save(true);
   }
 
   // ------------------------------------------------------------------ queues
   function lessonQueue() {
+    if (state.vacation) return [];
     return items
       .filter((it) => stageOf(it.id) === 0)
       .sort((a, b) => (a.lvl - b.lvl) || (TYPE_ORDER[a.t] - TYPE_ORDER[b.t]) || (a.idx - b.idx));
@@ -131,6 +252,7 @@
   }
   function reviewQueue(now = Date.now()) {
     const out = [];
+    if (state.vacation) return out;
     for (const [id, p] of Object.entries(state.items)) {
       if (p.s >= 1 && p.s < BURNED && p.a <= now && byId.has(id)) out.push(byId.get(id));
     }
@@ -138,6 +260,7 @@
   }
   function forecast(hours = 24) {
     const now = Date.now();
+    if (state.vacation) return { start: Math.floor(now / HOUR) * HOUR, buckets: new Array(hours).fill(0) };
     const start = Math.floor(now / HOUR) * HOUR;
     const buckets = new Array(hours).fill(0);
     for (const [id, p] of Object.entries(state.items)) {
@@ -148,6 +271,7 @@
     return { start, buckets };
   }
   function nextReviewAt() {
+    if (state.vacation) return null;
     let min = Infinity;
     for (const p of Object.values(state.items)) if (p.s >= 1 && p.s < BURNED && p.a < min) min = p.a;
     return min === Infinity ? null : min;
@@ -162,8 +286,8 @@
   function completeLesson(it) {
     const now = Date.now();
     const p = state.items[it.id] || (state.items[it.id] = { s: 0, u: now, c: 0, w: 0 });
-    p.s = 1; p.l = now; p.a = nextAvailable(1, now);
-    dayStats().lessons++;
+    p.s = 1; p.l = now; p.a = nextAvailable(1, now); p.t = now;
+    bumpDay('lessons');
     save();
   }
   /** Apply a finished review. wrongCount = total wrong answers this session for the item. */
@@ -174,24 +298,55 @@
     if (wrongCount === 0) {
       p.s = Math.min(BURNED, p.s + 1);
       p.c++;
+      p.k = (p.k || 0) + 1;
     } else {
       const penalty = Math.ceil(wrongCount / 2) * (p.s >= GURU ? 2 : 1);
       p.s = Math.max(1, p.s - penalty);
       p.w++;
+      p.k = 0;
+      p.lw = now;
     }
     p.a = nextAvailable(p.s, now);
+    p.t = now;
     if (p.s === BURNED) p.b = now;
-    const d = dayStats();
-    d.reviews++;
-    if (wrongCount === 0) d.correct++;
+    bumpDay('reviews');
+    if (wrongCount === 0) bumpDay('correct');
     const unlocked = refreshUnlocks();
     save();
     return { before, after: p.s, unlocked };
   }
+  // ------------------------------------------------------------------ extra study & leeches (no SRS effect)
+  const started = (p) => p && p.s >= 1;
+  function practiceSets(now = Date.now()) {
+    const recentLessons = [], recentMistakes = [], currentLevel = [];
+    for (const [id, p] of Object.entries(state.items)) {
+      const it = byId.get(id);
+      if (!it || !started(p)) continue;
+      if (p.l && now - p.l < 48 * HOUR) recentLessons.push(it);
+      if (p.lw && now - p.lw < 24 * HOUR) recentMistakes.push(it);
+      if (it.lvl === state.level) currentLevel.push(it);
+    }
+    return { recentLessons, recentMistakes, currentLevel, leeches: leeches().map((l) => l.it) };
+  }
+  // Leech score: wrong answers weighed against the current correct streak.
+  // Items you keep missing and haven't recovered from score highest.
+  function leechScore(p) { return p.w / Math.pow((p.k || 0) + 1, 1.5); }
+  function leeches({ minWrong = 2, minScore = 1 } = {}) {
+    const out = [];
+    for (const [id, p] of Object.entries(state.items)) {
+      const it = byId.get(id);
+      if (!it || !started(p) || p.s >= BURNED || p.w < minWrong) continue;
+      const score = leechScore(p);
+      if (score >= minScore) out.push({ it, p, score });
+    }
+    return out.sort((a, b) => b.score - a.score || b.p.w - a.p.w);
+  }
+
   function resetItem(id) {
     const p = state.items[id];
     if (!p) return;
     p.s = 0; delete p.a; delete p.l; delete p.b;
+    p.t = Date.now();
     save(true);
   }
 
@@ -202,7 +357,7 @@
     switch (it.t) {
       case 'kana': return ['reading'];
       case 'kanji': return ['meaning', ...(hasOn(it) ? ['on'] : []), ...(hasKun(it) ? ['kun'] : [])];
-      case 'vocab': return ['meaning', 'reading'];
+      case 'vocab': return it.kanji.length ? ['meaning', 'reading'] : ['meaning']; // kana-only words show their reading
       case 'sentence': return ['reading', 'translate'];
       default: return [];
     }
@@ -323,9 +478,11 @@
     if (reCache.has(it.id)) return reCache.get(it.id);
     const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     let src = '';
-    for (const [surface, reading, particle] of it.tokens) {
+    // token: [surface, reading, isParticle?, otherAcceptedReadings?]
+    for (const [surface, reading, particle, alts] of it.tokens) {
       if (!reading) continue;
-      src += particle ? `(?:${PARTICLE_ALT[surface]})` : esc(normKana(reading));
+      src += particle ? `(?:${PARTICLE_ALT[surface]})`
+        : alts ? `(?:${[reading, ...alts].map((r) => esc(normKana(r))).join('|')})` : esc(normKana(reading));
     }
     const re = new RegExp('^' + src + '$');
     reCache.set(it.id, re);
@@ -345,7 +502,12 @@
     if (it.t === 'kana') return it.c;
     if (it.t === 'kanji') return [...it.on.slice(0, 2).map(kataToHira), ...it.kun.slice(0, 2).map((k) => k.replace('.', ''))].join('、');
     if (it.t === 'vocab') return it.r[0];
-    return it.c;
+    return spokenText(it.tokens);
+  }
+  // Sentence tokens [surface, reading] → text for the voice, with kanji words replaced by their kana
+  // reading so Windows doesn't guess (it reads a lone お父さん as "ochichisan")
+  function spokenText(tokens) {
+    return tokens.map(([s, r]) => (r && /[㐀-鿿々]/.test(s) ? r : s)).join('');
   }
 
   function search(q) {
@@ -368,6 +530,71 @@
     return res.sort((a, b) => (b[0] - a[0]) || (TYPE_ORDER[a[1].t] - TYPE_ORDER[b[1].t]) || (a[1].lvl - b[1].lvl)).slice(0, 120).map((r) => r[1]);
   }
 
+  // ------------------------------------------------------------------ sync merge
+  /** The more recently changed copy of an item. Items from before sync have no `t`: fall back to review counts. */
+  function newerItem(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    if (a.t || b.t) return (a.t || 0) >= (b.t || 0) ? a : b;
+    const na = (a.c || 0) + (a.w || 0), nb = (b.c || 0) + (b.w || 0);
+    if (na !== nb) return na > nb ? a : b;
+    return (a.s || 0) >= (b.s || 0) ? a : b;
+  }
+  /**
+   * Combine two saves of the same progress (same epoch) from different devices. Pure: returns a new
+   * state. Each item, note and synonym list keeps whichever side changed it last; daily counts keep
+   * each device's own numbers; settings shared between devices follow the last change, and
+   * device-only settings (theme, voice…) stay as they are on `local`.
+   */
+  function merge(local, remote) {
+    const out = migrate(JSON.parse(JSON.stringify(local)));
+    const R = migrate(JSON.parse(JSON.stringify(remote)));
+    const L = local;
+    for (const id of new Set([...Object.keys(out.items), ...Object.keys(R.items)])) out.items[id] = newerItem(out.items[id], R.items[id]);
+    const keyed = (field, prefix) => {
+      const ids = new Set([...Object.keys(L[field]), ...Object.keys(R[field]),
+        ...Object.keys(R.mt).filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length))]);
+      for (const id of ids) {
+        const lt = (L.mt || {})[prefix + id] || 0, rt = R.mt[prefix + id] || 0;
+        // the newer change wins; with no timestamps on either side, keep anything that only one side has
+        if (rt > lt || (rt === lt && !(id in L[field]))) {
+          if (id in R[field]) out[field][id] = R[field][id]; else delete out[field][id];
+        }
+      }
+    };
+    keyed('notes', 'n:');
+    keyed('synonyms', 'y:');
+    if ((R.mt.settings || 0) > (out.mt.settings || 0)) {
+      for (const [k, v] of Object.entries(R.settings)) if (!DEVICE_SETTINGS.includes(k)) out.settings[k] = v;
+    }
+    if ((R.mt.vacation || 0) > (out.mt.vacation || 0)) out.vacation = R.vacation;
+    for (const [k, v] of Object.entries(R.mt)) out.mt[k] = Math.max(out.mt[k] || 0, v);
+    for (const [n, t] of Object.entries(R.levelLog)) out.levelLog[n] = out.levelLog[n] ? Math.min(out.levelLog[n], t) : t;
+    Object.assign(out.levelForced, R.levelForced);
+    out.level = Math.max(out.level, R.level);
+    out.createdAt = Math.min(out.createdAt || Infinity, R.createdAt || Infinity);
+    for (const [dev, log] of Object.entries(R.dayLog)) {
+      const mine = out.dayLog[dev] || (out.dayLog[dev] = {});
+      for (const [d, v] of Object.entries(log)) {
+        const o = mine[d] || (mine[d] = { reviews: 0, correct: 0, lessons: 0 });
+        for (const f of ['reviews', 'correct', 'lessons']) o[f] = Math.max(o[f] || 0, v[f] || 0);
+      }
+    }
+    out.days = sumDays(out.dayLog);
+    return out;
+  }
+  /** Take over another device's save outright (it was reset or imported more recently), keeping this device's own settings. */
+  function adopt(local, remote) {
+    const out = migrate(JSON.parse(JSON.stringify(remote)));
+    for (const k of DEVICE_SETTINGS) if (k in local.settings) out.settings[k] = local.settings[k];
+    return out;
+  }
+  /** Swap in synced progress without counting it as a new local change. */
+  function replaceState(s) {
+    quiet = true;
+    try { state = migrate(s); refreshUnlocks(); save(true); } finally { quiet = false; }
+  }
+
   async function init() {
     const loaded = await window.api.loadProgress();
     state = loaded ? migrate(loaded) : newState();
@@ -379,10 +606,15 @@
     levels, items, byId, byLevel, vocabByKanji, sentencesByKanji, MAX_LEVEL,
     STAGE_NAMES, INTERVAL_HOURS, GURU, BURNED, stageGroup,
     get state() { return state; },
-    init, save, flush, newState, migrate, setState(s) { state = migrate(s); refreshUnlocks(); save(true); },
+    init, save, flush, newState, migrate,
+    /** Load a different save (import, reset, another folder). New epoch, so synced devices take it over instead of merging. */
+    setState(s) { state = migrate(s); state.epoch = Date.now(); refreshUnlocks(); save(true); },
+    replaceState, merge, adopt, onChange(fn) { changeListener = fn; }, deviceId, DEVICE_SETTINGS,
+    setNote, setSynonyms, setSetting,
     prog, stageOf, levelProgress, refreshUnlocks, forceNextLevel,
     lessonQueue, lessonsLeftToday, reviewQueue, forecast, nextReviewAt, stageCounts, dayStats,
-    completeLesson, completeReview, resetItem,
-    promptsFor, grade, readingsOf, sentenceReading, speechText, kunForms, search,
+    completeLesson, completeReview, resetItem, practiceSets, leeches,
+    levelUpEstimate, markKnown, startVacation, endVacation,
+    promptsFor, grade, readingsOf, sentenceReading, speechText, spokenText, kunForms, search,
   };
 })();

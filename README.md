@@ -4,9 +4,10 @@ A WaniKani/Bunpro-style spaced-repetition app for Windows. It covers hiragana, k
 
 ## Install / run
 
-- **Install:** download `Kana-Kanji-SRS-Setup-1.0.0.exe` from the [Releases page](https://github.com/danielsan163/kana-kanji-srs/releases), or build it yourself with `npm run dist` (output in `dist\`). It adds desktop and Start Menu shortcuts.
+- **Install:** download `Kana-Kanji-SRS-Setup-1.1.0.exe` from the [Releases page](https://github.com/danielsan163/kana-kanji-srs/releases), or build it yourself with `npm run dist` (output in `dist\`). It adds desktop and Start Menu shortcuts.
   - Windows SmartScreen may warn because the app isn't code-signed. Choose **More info → Run anyway**.
 - **Run from source:** `npm start`
+- **iPhone:** open https://danielsan163.github.io/kana-kanji-srs/ in Safari, then Share → **Add to Home Screen**. Sign in under Settings → Sync & account on both devices to share progress.
 
 ## How it works
 
@@ -25,6 +26,10 @@ A WaniKani/Bunpro-style spaced-repetition app for Windows. It covers hiragana, k
 - **Reference examples (not reviewed):** shown on lesson pages, in Item info and in item details.
   - **Vocab:** up to 5 short, easy example sentences, each with an English translation, the word highlighted and furigana you can toggle.
   - **Kanji:** the 5 most common words containing it, ranked by how often they appear in Tatoeba, each with reading and meaning.
+- **Mnemonics:** every kana has a built-in mnemonic, and the 92 basic kana also have a doodle drawn around their real strokes (`scripts/kana-doodles.js`; preview them with `npx electron scripts/doodle-sheet.js <kana> <out.png>`). Your own notes appear first once you write some.
+- **Practice tab (no SRS effect):** re-drill recent mistakes (24h), recent lessons (48h), your current level, or leeches. The leech list ranks items you keep missing (wrong reviews ÷ (correct streak + 1)^1.5). After a review session, "Practise the ones I missed" starts a practice round right away.
+- **Already know something?** Press **K** ("I already know this") during a lesson to send it straight to Guru I.
+- **Vacation mode, review order, notifications, tray, start with Windows and the progress folder** are all in Settings.
 - **Typing:** readings auto-convert from romaji as you type. Type `nn` or `n'` for ん, and `-` for ー.
 
 ### Keyboard
@@ -46,7 +51,7 @@ Audio uses Windows text-to-speech, so it needs a Japanese voice.
 
 ## Your data
 
-Progress is saved to `%APPDATA%\KanaKanjiSRS\progress.json`. The app also makes a daily backup in `backups\` and keeps the last 14. You can export and import it from Settings.
+Progress is saved to `%APPDATA%\KanaKanjiSRS\progress.json` by default. You can move it (e.g. into OneDrive) from Settings → Progress folder. The app also makes a daily backup in `backups\` and keeps the last 14. You can export and import it from Settings.
 
 ## Rebuilding the content
 
@@ -57,9 +62,18 @@ The raw sources live in `raw/` and are not included in the installer.
 
 Note: this resets content only. Progress is keyed by the item's text, so it survives a rebuild.
 
+## Web version and sync
+
+- `npm run build-web` builds the web / iPhone version into `web-dist/`; `npm run serve-web` builds and serves it on http://localhost:5173 (add `-- --lan` to reach it from a phone on the same Wi-Fi).
+- `.github/workflows/pages.yml` publishes it to GitHub Pages when a release is published.
+- Sync and alerts run on [Supabase](https://supabase.com):
+  - `supabase/schema.sql`: tables and row-level security (each account sees only its own rows), plus a pg_cron job every 15 minutes.
+  - `supabase/functions/notify-reviews`: sends the Web Push alerts. Needs the secrets `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `NOTIFY_SECRET`.
+  - The project URL, publishable key and VAPID public key are in `app/js/sync.js`. All three are public by design.
+
 ## Development
 
-- `npm test`: answer-grading checks.
+- `npm test`: answer-grading and sync-merge checks.
 - `npm run dist`: build the installer into `dist/`.
 - `npx electron scripts/make-icon.js`: regenerate the icon.
 - `KKS_USERDATA=<dir> KKS_SHOT=<steps.json> npx electron .`: scripted screenshot run for UI testing (see `scripts/shot-driver.js`).
@@ -75,6 +89,8 @@ The app's source code is licensed under the [GNU GPL v3](LICENSE). The bundled d
 | Vocabulary (extra glosses) | JMdict © EDRDG, via jmdict-simplified | CC BY-SA 4.0 |
 | Phrases | [Tatoeba](https://tatoeba.org) | CC BY 2.0 FR |
 | Stroke order | [KanjiVG](https://kanjivg.tagaini.net) © Ulrich Apel | CC BY-SA 3.0 |
+
+| Textbook font (web version) | [Klee One](https://github.com/fontworks-fonts/Klee) © The Klee Project Authors, via Fontsource | SIL OFL 1.1 |
 
 Phrase readings are generated with kuromoji.js.
 

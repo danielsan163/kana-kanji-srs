@@ -6,25 +6,8 @@
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const view = $('#view');
-  // Fallback when opened in a plain browser (UI testing): keep progress in localStorage
-  if (!window.api) {
-    const KEY = 'kks-progress';
-    window.api = {
-      loadProgress: async () => { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } },
-      saveProgress: async (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} return true; },
-      saveProgressSync: (s) => { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} return true; },
-      getStrokes: async (ch) => { try { const r = await fetch('data/strokes.json'); return (await r.json())[ch] || null; } catch { return null; } },
-      getExamples: async (type, key) => {
-        try {
-          const ex = await (await fetch('data/examples.json')).json();
-          if (type === 'kanji') return ex.k[key] || [];
-          return (ex.v[key] || []).map(([si, i0, i1]) => ({ tokens: ex.s[si][0], en: ex.s[si][1], id: ex.s[si][2], hl: [i0, i1] }));
-        } catch { return []; }
-      },
-      exportProgress: async () => false, importProgress: async () => null,
-      openDataFolder() {}, openSpeechSettings() {}, openLink(u) { window.open(u); },
-    };
-  }
+  const isWeb = window.api.platform === 'web';
+  const isIOS = /iPhone|iPad/.test(navigator.userAgent);
   const TYPE_LABEL = { kana: 'Kana', kanji: 'Kanji', vocab: 'Vocabulary', sentence: 'Phrase' };
 
   // ------------------------------------------------------------------ routing & keys
@@ -32,6 +15,7 @@
   let keyHandler = null;
   function go(name, arg) {
     closeModal(true);
+    if (name === 'dashboard') dashLevel = null;
     if (current.cleanup) current.cleanup();
     current = { name, cleanup: null };
     keyHandler = null;
@@ -80,6 +64,7 @@
     const pref = SRS.state.settings.theme;
     const dark = pref === 'system' ? matchMedia('(prefers-color-scheme: dark)').matches : pref !== 'light';
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.documentElement.dataset.jpfont = SRS.state.settings.jpFont;
   }
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
@@ -125,10 +110,38 @@
   function tile(it, opts = {}) {
     const s = SRS.stageOf(it.id);
     const label = it.t === 'sentence' ? esc(it.c.slice(0, 6) + (it.c.length > 6 ? '…' : '')) : esc(it.c);
-    const cls = ['tile', 't-' + it.t, s < 0 ? 'locked' : '', opts.small ? 'small' : '', [...it.c].length > 2 ? 'wide' : ''].join(' ');
+    const stageCls = opts.byStage && s >= 0 ? 'by-stage st-' + SRS.stageGroup(s) : '';
+    const cls = ['tile', 't-' + it.t, s < 0 ? 'locked' : '', stageCls, opts.small ? 'small' : '', [...it.c].length > 2 ? 'wide' : ''].join(' ');
     const bar = s > 0 ? `<span class="stage-bar"><i style="width:${(s / 9) * 100}%"></i></span>` : '';
     return `<button class="${cls}" data-item="${esc(it.id)}" title="${esc(shortMeaning(it))} — ${s < 0 ? 'Locked' : SRS.STAGE_NAMES[s]}">${label}${bar}</button>`;
   }
+  const stageLegend = () => `<div class="stage-legend">${[['lesson', 'Not started'], ['apprentice', 'Apprentice'], ['guru', 'Guru'], ['master', 'Master'], ['enlightened', 'Enlightened'], ['burned', 'Burned']]
+    .map(([k, l]) => `<span><i class="sw st-${k}"></i>${l}</span>`).join('')}<span><i class="sw locked"></i>Locked</span></div>`;
+
+  /** Minimal Markdown for the bundled changelog: ## version, ### section, nested "- " bullets, **bold**, `code`. */
+  function changelogHTML(md) {
+    const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    const versions = [];
+    let cur = null, depth = -1;
+    const closeLists = (to) => { while (depth > to) { cur.html += '</li></ul>'; depth--; } };
+    for (const line of md.split(/\r?\n/)) {
+      const v = line.match(/^## (.+)/);
+      if (v) { if (cur) closeLists(-1); cur = { title: v[1], html: '' }; versions.push(cur); depth = -1; continue; }
+      if (!cur || /^# /.test(line)) continue;
+      const h = line.match(/^### (.+)/);
+      const li = line.match(/^(\s*)- (.+)/);
+      if (h) { closeLists(-1); cur.html += `<h4>${inline(h[1])}</h4>`; }
+      else if (li) {
+        const d = Math.floor(li[1].length / 2);
+        if (d > depth) { cur.html += '<ul><li>'; depth++; while (depth < d) { cur.html += '<ul><li>'; depth++; } }
+        else { closeLists(d); cur.html += '</li><li>'; }
+        cur.html += inline(li[2]);
+      } else if (line.trim()) { closeLists(-1); cur.html += `<p>${inline(line)}</p>`; }
+    }
+    if (cur) closeLists(-1);
+    return versions.map((x, i) => `<details class="changelog-version" ${i === 0 ? 'open' : ''}><summary>${inline(x.title)}</summary>${x.html}</details>`).join('');
+  }
+
   function shortMeaning(it) {
     if (it.t === 'kana') return it.romaji[0];
     if (it.t === 'sentence') return it.en;
@@ -156,7 +169,7 @@
     box.innerHTML = `<svg viewBox="0 0 109 109" fill="none" stroke-linecap="round" stroke-linejoin="round">
       <g class="ghost" stroke-width="3">${paths.map((d) => `<path d="${d}"/>`).join('')}</g>
       <g class="ink" stroke-width="3.2">${paths.map((d) => `<path d="${d}"/>`).join('')}</g></svg>
-      <div class="faint" style="font-size:12px">${paths.length} strokes · click to replay</div>`;
+      <div class="faint" style="font-size:12px">${paths.length} stroke${paths.length === 1 ? '' : 's'} · click to replay</div>`;
     const animate = () => {
       const token = ++strokeToken;
       const inks = $$('.ink path', box);
@@ -179,6 +192,13 @@
     animate();
   }
 
+  // Mnemonic doodle: the real kana strokes with the drawing around them (doodle markup is our own bundled data)
+  async function drawDoodle(box, it) {
+    const paths = await window.api.getStrokes(it.c);
+    if (!box.isConnected) return;
+    box.innerHTML = `<svg viewBox="-6 -8 121 122">${(paths || []).map((d) => `<path class="k" d="${d}"/>`).join('')}${it.dd}</svg>`;
+  }
+
   // ------------------------------------------------------------------ item detail
   function sentencesWithVocab(v) { return SRS.items.filter((s) => s.t === 'sentence' && s.words.includes(v.c)).slice(0, 4); }
   const vocabInSentence = (s) => s.words.map((w) => SRS.byId.get('v:' + w)).filter(Boolean);
@@ -198,12 +218,18 @@
         ${it.romaji.length > 1 ? `<dt>Also accepted</dt><dd>${esc(it.romaji.slice(1).join(', '))}</dd>` : ''}
         <dt>Script</dt><dd>${esc(it.script)}</dd>
         <dt>Pair</dt><dd class="readings">${esc(it.script === 'hiragana' ? Kana.hiraToKata(it.c) : Kana.kataToHira(it.c))}</dd></dl>`);
+      if (it.dd) side.push(`<div class="doodle-box" title="Mnemonic doodle"><div class="doodle-svg">Loading…</div><div class="doodle-cap">${esc(it.dc || '')}</div></div>`);
+      if ([...it.c].length === 1 && it.c !== 'ー') side.push(`<div class="stroke-box" id="stroke-box" style="margin-top:12px">Loading…</div>`);
     } else if (it.t === 'kanji') {
       main.push(`<dl class="kv"><dt>Meaning</dt><dd><span class="primary-meaning">${esc(it.meanings[0])}</span>
           ${it.meanings.length > 1 ? `<div class="muted">${esc(it.meanings.slice(1).join(', '))}</div>` : ''}</dd>
         <dt>On'yomi</dt><dd class="readings">${it.on.length ? esc(it.on.join('、')) : '<span class="faint">none</span>'}</dd>
         <dt>Kun'yomi</dt><dd class="readings">${it.kun.length ? it.kun.map(kunHTML).join('、') : '<span class="faint">none</span>'}</dd>
         <dt>Audio</dt><dd>${audioBtn(SRS.speechText(it))}</dd>
+        ${it.parts && it.parts.length ? `<dt>Parts</dt><dd class="parts">${it.parts.map(([el, m]) => {
+          const k = SRS.byId.get('k:' + el);
+          return `<span class="part ${k ? '' : 'ref'}" ${k ? `data-item="${esc(k.id)}"` : ''}><span class="jp">${esc(el)}</span>${m ? `<small>${esc(m)}</small>` : ''}</span>`;
+        }).join('<span class="plus">+</span>')}</dd>` : ''}
         <dt>Info</dt><dd class="muted">JLPT N${it.jlpt} · ${it.strokes} strokes · Level ${it.lvl}</dd></dl>`);
       side.push(`<div class="stroke-box" id="stroke-box">Loading…</div>`);
       const vs = SRS.vocabByKanji.get(it.c) || [];
@@ -216,14 +242,14 @@
         <dt>Reading</dt><dd class="readings">${esc(it.r.join('、'))} ${audioBtn(it.r[0])}</dd>
         <dt>Info</dt><dd class="muted">JLPT N${it.jlpt} · Level ${it.lvl}</dd></dl>`);
       const ks = it.kanji.map((k) => SRS.byId.get('k:' + k)).filter(Boolean);
-      main.push(`<h3>Kanji</h3><div class="list-rows">${ks.map(rowFor).join('')}</div>`);
+      if (ks.length) main.push(`<h3>Kanji</h3><div class="list-rows">${ks.map(rowFor).join('')}</div>`);
       main.push(`<h3 class="row" style="justify-content:space-between">Example sentences
           <button class="btn small furi-toggle" title="Show or hide readings above kanji">Furigana: ${SRS.state.settings.exampleFurigana ? 'on' : 'off'}</button></h3>
         <div class="ex-box"><span class="faint">Loading…</span></div>`);
       const ss = sentencesWithVocab(it);
       if (ss.length) main.push(`<h3>Phrases you'll study</h3><div class="list-rows">${ss.map(rowFor).join('')}</div>`);
     } else if (it.t === 'sentence') {
-      main.push(`<div class="jp" style="font-size:30px;line-height:2">${sentenceHTML(it, true)} ${audioBtn(it.c)}</div>
+      main.push(`<div class="jp" style="font-size:30px;line-height:2">${sentenceHTML(it, true)} ${audioBtn(SRS.speechText(it))}</div>
         <div class="translation">${esc(it.en)}</div>
         <div class="muted jp" style="margin-top:6px">${esc(SRS.sentenceReading(it))}</div>`);
       const vs = vocabInSentence(it);
@@ -233,8 +259,13 @@
         <div class="faint" style="font-size:12px;margin-top:10px">Sentence from Tatoeba (#${esc(it.id.slice(2))}). Readings are machine-generated and may occasionally be off.</div>`);
     }
 
+    // built-in mnemonic; your own notes come first once you've written some
+    const mnHTML = it.mn ? `<h3>Mnemonic</h3><div class="mnemonic">${esc(it.mn).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')}</div>` : '';
+    const hasNotes = !!(SRS.state.notes[it.id] || '').trim();
+    if (!hasNotes) main.push(mnHTML);
     // notes & synonyms
     main.push(`<h3>Your mnemonic / notes</h3><textarea class="notes" placeholder="Write a mnemonic or anything that helps you remember…">${esc(SRS.state.notes[it.id] || '')}</textarea>`);
+    if (hasNotes) main.push(mnHTML.replace('<h3>Mnemonic</h3>', '<h3>Built-in mnemonic</h3>'));
     if (it.t === 'kanji' || it.t === 'vocab') {
       const syn = SRS.state.synonyms[it.id] || [];
       main.push(`<h3>Your synonyms (accepted as meanings)</h3><div class="synonyms">${syn.map((s, i) => `<span class="chip">${esc(s)}<button data-del-syn="${i}" title="Remove">✕</button></span>`).join('')}
@@ -246,11 +277,15 @@
         ${p && p.s === 0 ? '<div class="muted" style="margin-top:8px">Waiting in your lessons</div>' : ''}
         ${!p ? `<div class="muted" style="margin-top:8px">Unlocks ${it.t === 'vocab' || it.t === 'sentence' ? 'when its kanji reach Guru' : `at level ${it.lvl}`}</div>` : ''}
         ${p && (p.c || p.w) ? `<div class="muted" style="margin-top:4px">Reviews: ${p.c} correct, ${p.w} incorrect</div>` : ''}
-        ${p && p.s >= 1 ? `<button class="btn small" id="reset-item" style="margin-top:10px">Reset to lesson</button>` : ''}</div>`);
+        ${p && p.mk ? '<div class="faint" style="margin-top:4px;font-size:12px">Marked as already known</div>' : ''}
+        <div class="row" style="margin-top:10px">
+          ${p && p.s < SRS.GURU ? `<button class="btn small" id="mark-known" title="Send it straight to Guru I. You'll get a check-up review in a week.">Mark as known</button>` : ''}
+          ${p && p.s >= 1 ? `<button class="btn small" id="reset-item">Reset to lesson</button>` : ''}</div></div>`);
     }
 
     container.innerHTML = `<div class="detail-grid"><div>${main.join('')}</div><div>${side.join('')}</div></div>`;
-    if (it.t === 'kanji') drawStrokes($('#stroke-box', container), it.c);
+    if ($('#stroke-box', container)) drawStrokes($('#stroke-box', container), it.c);
+    if (it.dd) drawDoodle($('.doodle-svg', container), it);
     if (it.t === 'kanji' || it.t === 'vocab') loadExamples(container, it);
 
     const notes = $('.notes', container);
@@ -258,9 +293,7 @@
     notes.addEventListener('input', () => {
       clearTimeout(nt);
       nt = setTimeout(() => {
-        const v = notes.value.trim();
-        if (v) SRS.state.notes[it.id] = notes.value; else delete SRS.state.notes[it.id];
-        SRS.save();
+        SRS.setNote(it.id, notes.value);
       }, 300);
     });
     notes.addEventListener('keydown', (e) => e.stopPropagation());
@@ -269,18 +302,23 @@
       synIn.addEventListener('keydown', (e) => {
         e.stopPropagation();
         if (e.key === 'Enter' && synIn.value.trim()) {
-          (SRS.state.synonyms[it.id] = SRS.state.synonyms[it.id] || []).push(synIn.value.trim());
-          SRS.save();
+          SRS.setSynonyms(it.id, [...(SRS.state.synonyms[it.id] || []), synIn.value.trim()]);
           renderDetail(container, it, opts);
           $('.syn-input', container).focus();
         }
       });
       $$('[data-del-syn]', container).forEach((b) => b.addEventListener('click', () => {
-        SRS.state.synonyms[it.id].splice(+b.dataset.delSyn, 1);
-        SRS.save();
+        SRS.setSynonyms(it.id, SRS.state.synonyms[it.id].filter((_, i) => i !== +b.dataset.delSyn));
         renderDetail(container, it, opts);
       }));
     }
+    const mk = $('#mark-known', container);
+    if (mk) mk.addEventListener('click', () => {
+      SRS.markKnown(it.id);
+      toast(`${it.c} marked as known (Guru I)`);
+      renderDetail(container, it, opts);
+      updateNav();
+    });
     const reset = $('#reset-item', container);
     if (reset) reset.addEventListener('click', () => {
       if (!confirm('Move this item back to your lessons? Its SRS progress will be lost.')) return;
@@ -319,16 +357,14 @@
           const t = furi && r ? furigana(s, r) : esc(s);
           return i >= ex.hl[0] && i <= ex.hl[1] ? `<mark class="hl">${t}</mark>` : t;
         }).join('');
-        const text = ex.tokens.map((t) => t[0]).join('');
-        return `<div class="ex-sentence"><div class="ex-jp jp">${html} ${audioBtn(text)}</div><div class="ex-en">${esc(ex.en)}</div></div>`;
+        return `<div class="ex-sentence"><div class="ex-jp jp">${html} ${audioBtn(SRS.spokenText(ex.tokens))}</div><div class="ex-en">${esc(ex.en)}</div></div>`;
       }).join('') + '<div class="faint" style="font-size:12px">Sentences from Tatoeba · readings are machine-generated</div>'
         : '<span class="faint">No example sentences found for this word.</span>';
     };
     render();
     const btn = $('.furi-toggle', container);
     if (btn) btn.onclick = () => {
-      SRS.state.settings.exampleFurigana = !SRS.state.settings.exampleFurigana;
-      SRS.save();
+      SRS.setSetting('exampleFurigana', !SRS.state.settings.exampleFurigana);
       btn.textContent = `Furigana: ${SRS.state.settings.exampleFurigana ? 'on' : 'off'}`;
       render();
     };
@@ -355,39 +391,72 @@
     renderDetail($('#modal-body'), it);
     $('.modal-close').onclick = () => closeModal();
   }
+  /** Small in-app dialog with custom buttons. Resolves with the chosen button's value (null on Esc/close). */
+  function choose(title, html, buttons) {
+    return new Promise((resolve) => {
+      $('#modal-card').innerHTML = `<button class="modal-close" title="Close (Esc)">✕</button><h2>${esc(title)}</h2>
+        <div class="muted" style="line-height:1.6">${html}</div>
+        <div class="row" style="margin-top:18px;justify-content:flex-end">${buttons.map((b, i) => `<button class="btn ${b.primary ? 'primary' : ''}" data-choice="${i}">${esc(b.label)}</button>`).join('')}</div>`;
+      $('#modal').classList.remove('hidden');
+      const done = (v) => { obs.disconnect(); closeModal(true); resolve(v); };
+      const obs = new MutationObserver(() => { if ($('#modal').classList.contains('hidden')) { obs.disconnect(); resolve(null); } });
+      obs.observe($('#modal'), { attributes: true });
+      $('.modal-close').onclick = () => done(null);
+      $$('[data-choice]').forEach((b) => b.addEventListener('click', () => done(buttons[+b.dataset.choice].value)));
+    });
+  }
+
   function closeModal(navigating) {
     const m = $('#modal');
     if (m.classList.contains('hidden')) return;
     m.classList.add('hidden');
     $('#modal-card').innerHTML = '';
-    if (!navigating && (current.name === 'dashboard' || current.name === 'browse')) VIEWS[current.name].refresh?.();
+    if (!navigating && ['dashboard', 'browse', 'practice'].includes(current.name) && !$('.quiz')) VIEWS[current.name].refresh?.();
     updateNav();
   }
   $('#modal').addEventListener('mousedown', (e) => { if (e.target.id === 'modal') closeModal(); });
 
   // ------------------------------------------------------------------ dashboard
+  let dashLevel = null; // level shown on the dashboard's level card (null = current level)
+  let historyAll = false;
   function viewDashboard() {
     const st = SRS.state;
+    const shown = Math.min(Math.max(1, dashLevel || st.level), st.level);
+    const isCurrent = shown === st.level;
     const lessons = SRS.lessonQueue();
     const lessonsAvail = Math.min(lessons.length, SRS.lessonsLeftToday());
     const reviews = SRS.reviewQueue().length;
     const next = SRS.nextReviewAt();
-    const lp = SRS.levelProgress(st.level);
-    const lvl = SRS.levels[st.level - 1];
+    const lp = SRS.levelProgress(shown);
+    const lvl = SRS.levels[shown - 1];
     const counts = SRS.stageCounts();
     const fc = SRS.forecast(24);
     const fc7 = SRS.forecast(24 * 7);
     const maxBar = Math.max(1, ...fc.buckets);
     const today = SRS.dayStats();
-    const gating = SRS.byLevel.get(st.level).filter((it) => it.t === 'kana' || it.t === 'kanji');
-    const others = SRS.byLevel.get(st.level).filter((it) => it.t === 'vocab' || it.t === 'sentence');
+    const gating = SRS.byLevel.get(shown).filter((it) => it.t === 'kana' || it.t === 'kanji');
+    const others = SRS.byLevel.get(shown).filter((it) => it.t === 'vocab' || it.t === 'sentence');
+    const fmtDate = (ts) => new Date(ts).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    const fmtWhen = (ts) => `${new Date(ts).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}, ${new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} (${relTime(ts)})`;
+    const estimate = isCurrent ? SRS.levelUpEstimate() : null;
+    const history = Object.keys(st.levelLog).map(Number).sort((a, b) => b - a).map((n) => {
+      const start = st.levelLog[n], end = st.levelLog[n + 1] || null;
+      const days = ((end || Date.now()) - start) / 86400e3;
+      const dur = days < 1 ? `${Math.max(1, Math.round(days * 24))} h` : `${days.toFixed(days < 10 ? 1 : 0)} days`;
+      return `<tr><td><b>${n}</b></td><td>${esc(SRS.levels[n - 1].name)}</td><td>${fmtDate(start)}</td>
+        <td>${end ? dur : `${dur} so far`}</td><td>${st.levelForced[n] ? '<span class="faint">unlocked early</span>' : ''}</td></tr>`;
+    });
+    const leveledUpAt = !isCurrent && st.levelLog[shown + 1];
+    const levelStatus = isCurrent
+      ? `${lp.guru} / ${lp.total} ${lvl.kind === 'kana' ? 'kana' : 'kanji'} at Guru · ${lp.needed} needed to level up`
+      : `${lp.guru} / ${lp.total} ${lvl.kind === 'kana' ? 'kana' : 'kanji'} at Guru${leveledUpAt ? ` · moved on to level ${shown + 1} on ${fmtDate(leveledUpAt)}` : ''}`;
     let cumulative = reviews;
 
     const bars = fc.buckets.map((n, i) => {
       cumulative += n;
       const t = new Date(fc.start + i * 3600e3);
       const label = t.toLocaleTimeString([], { hour: 'numeric' });
-      return `<div class="bar-slot"><div class="tip">${label}: ${n} new · ${cumulative} total</div><div class="bar" style="height:${(n / maxBar) * 100}%"></div></div>`;
+      return `<div class="bar-slot" tabindex="0"><div class="tip">${label}: ${n} new · ${cumulative} total</div><div class="bar" style="height:${(n / maxBar) * 100}%"></div></div>`;
     }).join('');
     const axis = fc.buckets.map((_, i) => {
       const t = new Date(fc.start + i * 3600e3);
@@ -413,27 +482,38 @@
       <div class="grid cols-2">
         <button class="big-action lessons" id="go-lessons" ${lessonsAvail ? '' : 'disabled'}>
           <div class="label">Lessons</div><div class="count">${lessonsAvail}</div>
-          <div class="sub">${lessonsAvail ? 'New items ready to learn' : lessons.length ? 'Daily lesson limit reached' : 'No new lessons. Level up to unlock more'}</div></button>
+          <div class="sub">${st.vacation ? 'Paused (vacation mode)' : lessonsAvail ? 'New items ready to learn' : lessons.length ? 'Daily lesson limit reached' : 'No new lessons. Level up to unlock more'}</div></button>
         <button class="big-action reviews" id="go-reviews" ${reviews ? '' : 'disabled'}>
           <div class="label">Reviews</div><div class="count">${reviews}</div>
-          <div class="sub">${reviews ? 'Ready now' : next ? `Next review ${relTime(next)}` : 'Finish some lessons first'}</div></button>
+          <div class="sub">${st.vacation ? 'Paused (vacation mode)' : reviews ? 'Ready now' : next ? `Next review ${relTime(next)}` : 'Finish some lessons first'}</div></button>
       </div>
+      ${st.vacation ? `<div class="card vacation-banner" style="margin-top:16px"><div>🏖️ <b>Vacation mode is on</b> since ${new Date(st.vacation.since).toLocaleDateString([], { month: 'short', day: 'numeric' })}.
+        Reviews and lessons are paused, and nothing piles up while you're away.</div><button class="btn primary" id="end-vacation">End vacation</button></div>` : ''}
       ${!Speech.available ? `<div class="card" style="margin-top:16px;border-color:var(--sentence)">🔈 No Japanese text-to-speech voice found, so audio is off. <a href="#" id="voice-help">How to install it</a></div>` : ''}
       <div class="grid cols-2" style="margin-top:16px">
         <div class="card">
-          <h2>Level ${lvl.n} <span class="muted" style="font-weight:500">· ${esc(lvl.name)}</span></h2>
-          <div class="muted" style="margin-bottom:8px">${lp.guru} / ${lp.total} ${lvl.kind === 'kana' ? 'kana' : 'kanji'} at Guru · ${lp.needed} needed to level up</div>
+          <div class="level-head">
+            <button class="level-arrow" id="lvl-prev" title="Previous level (←)" aria-label="Previous level" ${shown <= 1 ? 'disabled' : ''}>‹</button>
+            <h2>Level ${lvl.n} <span class="muted" style="font-weight:500">· ${esc(lvl.name)}</span>
+              ${isCurrent ? '<span class="stage-chip sg-guru" style="vertical-align:middle">Current</span>' : ''}</h2>
+            <span class="spacer"></span>
+            ${!isCurrent ? '<button class="btn small" id="lvl-current">Back to current</button>' : ''}
+            <button class="level-arrow" id="lvl-next" title="Next level (→)" aria-label="Next level" ${isCurrent ? 'disabled' : ''}>›</button>
+          </div>
+          <div class="muted" style="margin-bottom:8px">${levelStatus}</div>
+          ${isCurrent && estimate ? `<div class="level-estimate">🎯 Earliest level-up: <b>${fmtWhen(estimate)}</b> <span class="faint">if you get every review right</span></div>` : ''}
           <div class="progress"><div style="width:${(lp.guru / lp.total) * 100}%"></div><span class="goal" style="left:90%"></span></div>
-          <h3>${lvl.kind === 'kana' ? 'Kana' : 'Kanji'}</h3><div class="tiles">${gating.map((it) => tile(it)).join('')}</div>
-          ${others.length ? `<h3>Vocabulary & phrases</h3><div class="tiles">${others.map((it) => tile(it, { small: true })).join('')}</div>` : ''}
+          <h3>${lvl.kind === 'kana' ? 'Kana' : 'Kanji'}</h3><div class="tiles">${gating.map((it) => tile(it, { byStage: true })).join('')}</div>
+          ${others.length ? `<h3>Vocabulary & phrases</h3><div class="tiles">${others.map((it) => tile(it, { small: true, byStage: true })).join('')}</div>` : ''}
+          ${stageLegend()}
           <div class="row" style="margin-top:16px">
-            ${st.level < SRS.MAX_LEVEL ? `<button class="btn" id="force-level">Unlock level ${st.level + 1} now</button>
+            ${isCurrent && st.level < SRS.MAX_LEVEL ? `<button class="btn" id="force-level">Unlock level ${st.level + 1} now</button>
             <span class="faint" style="font-size:12px">For material you already know. Items still go through lessons.</span>` : ''}
           </div>
         </div>
         <div class="card">
           <h2>Upcoming reviews</h2>
-          <div class="muted" style="font-size:13px">Next 24 hours, by hour · hover a bar for totals</div>
+          <div class="muted" style="font-size:13px">Next 24 hours, by hour · ${matchMedia('(hover: none)').matches ? 'tap' : 'hover'} a bar for totals</div>
           <div class="forecast">${bars}</div>
           <div class="forecast-base"></div>
           <div class="forecast-axis">${axis}</div>
@@ -448,6 +528,12 @@
         </div>
       </div>
       <div class="card" style="margin-top:16px">
+        <h2>Level history</h2>
+        <div class="table-wrap"><table class="leech-table history-table"><thead><tr><th>Level</th><th>Name</th><th>Reached</th><th>Time on level</th><th></th></tr></thead>
+          <tbody>${history.slice(0, historyAll ? history.length : 6).join('')}</tbody></table></div>
+        ${history.length > 6 ? `<button class="btn small" id="history-toggle" style="margin-top:10px">${historyAll ? 'Show fewer' : `Show all ${history.length}`}</button>` : ''}
+      </div>
+      <div class="card" style="margin-top:16px">
         <h2>SRS stages</h2>
         <div class="stat-tiles">
           ${[['apprentice', 'Apprentice'], ['guru', 'Guru'], ['master', 'Master'], ['enlightened', 'Enlightened'], ['burned', 'Burned']]
@@ -455,6 +541,17 @@
         </div>
       </div>
     </div>`;
+    const showLevel = (n) => { dashLevel = Math.min(Math.max(1, n), st.level); viewDashboard.refresh(); };
+    if ($('#history-toggle')) $('#history-toggle').onclick = () => { historyAll = !historyAll; viewDashboard.refresh(); };
+    if ($('#end-vacation')) $('#end-vacation').onclick = () => { SRS.endVacation(); toast('Welcome back! Your reviews pick up where you left off.'); viewDashboard.refresh(); updateNav(); };
+    $('#lvl-prev').onclick = () => showLevel(shown - 1);
+    $('#lvl-next').onclick = () => showLevel(shown + 1);
+    if ($('#lvl-current')) $('#lvl-current').onclick = () => showLevel(st.level);
+    keyHandler = (e) => {
+      if (e.target.matches('input, textarea, select')) return;
+      if (e.key === 'ArrowLeft' && shown > 1) showLevel(shown - 1);
+      if (e.key === 'ArrowRight' && !isCurrent) showLevel(shown + 1);
+    };
     $('#go-lessons').onclick = () => go('lessons');
     $('#go-reviews').onclick = () => go('reviews');
     const fl = $('#force-level');
@@ -497,22 +594,36 @@
         <div class="card lesson-body" id="lesson-detail"></div>
         <div class="lesson-nav">
           <button class="btn" id="prev" ${i === 0 ? 'disabled' : ''}>← Previous</button>
+          <button class="btn" id="known" title="Skip this lesson and send the item straight to Guru I. You'll get a check-up review in a week.">I already know this <span class="kbd">K</span></button>
           ${i < batch.length - 1 ? '<button class="btn primary" id="next">Next <span class="kbd">Enter</span></button>'
             : '<button class="btn primary" id="quiz">Start quiz <span class="kbd">Enter</span></button>'}
         </div></div>`;
       renderDetail($('#lesson-detail'), it, { hideSrs: true });
       $$('.lesson-strip .tile').forEach((t) => t.addEventListener('click', () => { i = +t.dataset.j; show(); }));
       $('#prev').onclick = prev;
+      $('#known').onclick = markKnown;
       if ($('#next')) $('#next').onclick = next;
       if ($('#quiz')) $('#quiz').onclick = startQuiz;
       if (SRS.state.settings.autoplayAudio && Speech.available && it.t !== 'kanji') Speech.speak(SRS.speechText(it));
     }
     const next = () => { if (i < batch.length - 1) { i++; show(); } else startQuiz(); };
     const prev = () => { if (i > 0) { i--; show(); } };
+    function markKnown() {
+      const it = batch[i];
+      SRS.markKnown(it.id);
+      toast(`${it.c} marked as known (Guru I)`);
+      batch.splice(i, 1);
+      [...seen].forEach((j) => { if (j >= i) seen.delete(j); });
+      updateNav();
+      if (!batch.length) { go('lessons'); return; }
+      if (i >= batch.length) i = batch.length - 1;
+      show();
+    }
     keyHandler = (e) => {
       if (e.target.matches('textarea, input')) return;
       if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); next(); }
       if (e.key === 'ArrowLeft') prev();
+      if (e.key === 'k' || e.key === 'K') markKnown();
     };
     function startQuiz() {
       runQuiz({
@@ -521,14 +632,21 @@
         title: 'Lesson quiz',
         onItemDone: (it) => SRS.completeLesson(it),
         onFinish: () => {
-          keyHandler = (e) => { if (e.key === 'Enter') go(SRS.lessonQueue().length ? 'lessons' : 'dashboard'); };
           const more = Math.min(SRS.lessonQueue().length, SRS.lessonsLeftToday());
+          const due = SRS.reviewQueue().length;
+          keyHandler = (e) => {
+            const k = e.key.toLowerCase();
+            if (k === 'enter') { e.preventDefault(); go(more ? 'lessons' : 'dashboard'); }
+            else if (k === 'd') go('dashboard');
+            else if (k === 'r' && due) go('reviews');
+          };
           view.innerHTML = `<div class="page"><div class="card" style="text-align:center;padding:40px">
             <h1>Lessons complete 🎉</h1><p class="muted">${batch.length} items moved to Apprentice. First review in about 4 hours.</p>
             <div class="tiles" style="justify-content:center;margin:16px 0">${batch.map((b) => tile(b)).join('')}</div>
             <div class="row" style="justify-content:center">
               ${more ? `<button class="btn primary" data-go="lessons">More lessons (${more}) <span class="kbd">Enter</span></button>` : ''}
-              <button class="btn" data-go="dashboard">Dashboard</button></div></div></div>`;
+              ${due ? `<button class="btn" data-go="reviews">Reviews (${due}) <span class="kbd">R</span></button>` : ''}
+              <button class="btn ${more ? '' : 'primary'}" data-go="dashboard">Dashboard <span class="kbd">${more ? 'D' : 'Enter'}</span></button></div></div></div>`;
           updateNav();
         },
       });
@@ -552,7 +670,12 @@
   }
 
   function runQuiz({ items, mode, title, onItemDone, onFinish }) {
+    const order = mode === 'lesson' ? 'random' : SRS.state.settings.reviewOrder;
+    const TYPE_RANK = { kana: 0, kanji: 1, vocab: 2, sentence: 3 };
     const pending = shuffle(items.slice());
+    if (order === 'lowerFirst') pending.sort((a, b) => a.lvl - b.lvl);           // stable: random within a level
+    else if (order === 'typeFirst') pending.sort((a, b) => TYPE_RANK[a.t] - TYPE_RANK[b.t]);
+    const backToBack = mode !== 'lesson' && SRS.state.settings.backToBack;
     const active = [];
     const ACTIVE_MAX = mode === 'lesson' ? Infinity : 10;
     const total = items.length;
@@ -574,8 +697,10 @@
     function next() {
       fill();
       if (!active.length) return finish();
-      let pool = active.length > 1 ? active.filter((s) => s.it.id !== lastItemId) : active;
-      const st = pool[Math.floor(Math.random() * pool.length)];
+      // Back-to-back: finish the remaining questions of the item you just answered before moving on
+      const same = backToBack && active.find((x) => x.it.id === lastItemId);
+      let pool = active.length > 1 ? active.filter((x) => x.it.id !== lastItemId) : active;
+      const st = same || pool[Math.floor(Math.random() * pool.length)];
       // Sentences: reading before meaning so the reveal shows furigana at the right moment
       const prompt = st.it.t === 'sentence' ? st.prompts[0] : st.prompts[Math.floor(Math.random() * st.prompts.length)];
       cur = { st, prompt };
@@ -596,7 +721,7 @@
         <div class="quiz-top"><span>${esc(title)}</span>
           <span id="stat-done">✓ ${done.length} / ${total}</span><span id="stat-pct">${pct}% correct</span>
           <span class="spacer"></span>
-          ${mode === 'review' ? `<button class="btn small" id="wrap" ${wrapUp ? 'disabled' : ''}>${wrapUp ? `Wrapping up (${active.length})` : 'Wrap up'}</button>` : ''}
+          ${mode !== 'lesson' ? `<button class="btn small" id="wrap" ${wrapUp ? 'disabled' : ''}>${wrapUp ? `Wrapping up (${active.length})` : 'Wrap up'}</button>` : ''}
           <button class="btn small" id="exit">Exit</button></div>
         ${subjectHTML(it, { furigana: it.t === 'sentence' && (st.readingDone || (phase === 'graded' && prompt === 'reading')) })}
         <div class="prompt-bar ${info.cls}">${promptLabel(it, prompt)}</div>
@@ -607,7 +732,7 @@
               ${phase === 'selfgrade' ? `<div class="row"><button class="btn" id="got" style="border-color:var(--ok)">I understood it <span class="kbd">1</span></button>
                 <button class="btn" id="missed" style="border-color:var(--bad)">I missed it <span class="kbd">2</span></button></div>` : ''}`}
           </div>`
-        : `<div class="answer-row"><input class="answer" id="answer" autocomplete="off" spellcheck="false" placeholder="${prompt === 'meaning' ? 'Your answer' : prompt === 'on' ? '答え (katakana)' : it.t === 'kana' ? 'romaji' : '答え'}">
+        : `<div class="answer-row"><input class="answer" id="answer" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="${prompt === 'meaning' ? 'Your answer' : prompt === 'on' ? '答え (katakana)' : it.t === 'kana' ? 'romaji' : '答え'}">
           <button class="answer-submit" id="submit" title="Submit (Enter)">➜</button></div>`}
         <div class="quiz-msg" id="msg">${esc(message)}</div>
         <div class="quiz-actions" id="actions"></div>
@@ -615,7 +740,7 @@
       </div>`;
       $('#exit').onclick = () => {
         if (mode === 'review' && done.length < total && !confirm('Exit reviews? Items you finished are saved; unfinished ones stay in your queue.')) return;
-        go('dashboard');
+        go(mode === 'practice' ? 'practice' : 'dashboard');
       };
       const wrap = $('#wrap');
       if (wrap) wrap.onclick = () => { wrapUp = true; pending.length = 0; render(); if (phase === 'answer') $('#answer')?.focus(); };
@@ -730,7 +855,7 @@
           msg.innerHTML = `${esc(SRS.STAGE_NAMES[res.before])} → <b>${esc(SRS.STAGE_NAMES[res.after])}</b>${up ? ' ↑' : ''}`;
         }
       } else {
-        onItemDone(st.it);
+        if (onItemDone) onItemDone(st.it);
         done.push({ it: st.it, wrong: st.wrong });
       }
       updateStats();
@@ -742,18 +867,34 @@
       if (mode === 'lesson') return onFinish();
       const right = done.filter((d) => d.wrong === 0);
       const wrongs = done.filter((d) => d.wrong > 0);
-      keyHandler = (e) => { if (e.key === 'Enter') go('dashboard'); };
+      const practice = mode === 'practice';
+      const lessonsLeft = SRS.lessonQueue().length;
+      const due = SRS.reviewQueue().length;
+      const practiseMissed = () => startPractice(wrongs.map((d) => d.it), 'Practice: missed items');
+      keyHandler = (e) => {
+        const k = e.key.toLowerCase();
+        if (k === 'enter') { e.preventDefault(); go(practice ? 'practice' : 'dashboard'); }
+        else if (k === ' ' && wrongs.length) { e.preventDefault(); practiseMissed(); }
+        else if (k === 'd') go('dashboard');
+        else if (k === 'l' && lessonsLeft) go('lessons');
+        else if (k === 'r' && due) go('reviews');
+      };
       view.innerHTML = `<div class="page"><div class="card" style="padding:28px">
-        <h1>Review summary</h1>
-        <p class="muted">${done.length} items reviewed · ${done.length ? Math.round((right.length / done.length) * 100) : 0}% correct
-        ${unlockedAll.length ? ` · <b>${unlockedAll.length} new items unlocked</b>` : ''}</p>
-        <h3>Correct (${right.length})</h3><div class="summary-list">${right.map((d) => tile(d.it, { small: true })).join('') || '<span class="faint">—</span>'}</div>
-        <h3>Needs work (${wrongs.length})</h3><div class="summary-list">${wrongs.map((d) => tile(d.it, { small: true })).join('') || '<span class="faint">—</span>'}</div>
+        <h1>${practice ? 'Practice summary' : 'Review summary'}</h1>
+        <p class="muted">${done.length} items ${practice ? 'practised' : 'reviewed'} · ${done.length ? Math.round((right.length / done.length) * 100) : 0}% correct
+        ${unlockedAll.length ? ` · <b>${unlockedAll.length} new items unlocked</b>` : ''}${practice ? ' · Practice doesn&#39;t change your SRS stages' : ''}</p>
+        <h3>Correct (${right.length})</h3><div class="summary-list">${right.map((d) => tile(d.it, { small: true, byStage: !practice })).join('') || '<span class="faint">—</span>'}</div>
+        <h3>Needs work (${wrongs.length})</h3><div class="summary-list">${wrongs.map((d) => tile(d.it, { small: true, byStage: !practice })).join('') || '<span class="faint">—</span>'}</div>
         <div class="row" style="margin-top:22px">
-          <button class="btn primary" data-go="dashboard">Dashboard <span class="kbd">Enter</span></button>
-          ${SRS.lessonQueue().length ? '<button class="btn" data-go="lessons">Lessons</button>' : ''}
-          ${SRS.reviewQueue().length ? '<button class="btn" data-go="reviews">More reviews</button>' : ''}
+          ${practice ? '<button class="btn primary" data-go="practice">Back to practice <span class="kbd">Enter</span></button>'
+            : '<button class="btn primary" data-go="dashboard">Dashboard <span class="kbd">Enter</span></button>'}
+          ${wrongs.length ? `<button class="btn" id="practice-wrongs">Practise the ${wrongs.length} I missed <span class="kbd">Space</span></button>` : ''}
+          ${practice ? '<button class="btn" data-go="dashboard">Dashboard <span class="kbd">D</span></button>' : ''}
+          ${lessonsLeft ? '<button class="btn" data-go="lessons">Lessons <span class="kbd">L</span></button>' : ''}
+          ${due ? `<button class="btn" data-go="reviews">More reviews (${due}) <span class="kbd">R</span></button>` : ''}
         </div></div></div>`;
+      const pw = $('#practice-wrongs');
+      if (pw) pw.onclick = practiseMissed;
       updateNav();
     }
 
@@ -787,6 +928,56 @@
     runQuiz({ items: q, mode: 'review', title: 'Reviews' });
   }
 
+  // ------------------------------------------------------------------ practice (extra study + leeches, no SRS effect)
+  function startPractice(list, title) {
+    if (!list.length) return;
+    if (current.cleanup) current.cleanup();
+    current = { name: 'practice', cleanup: null };
+    $$('nav button').forEach((b) => b.classList.toggle('active', b.dataset.go === 'practice'));
+    runQuiz({ items: list, mode: 'practice', title });
+  }
+  function relTimePast(ts) {
+    const d = Date.now() - ts;
+    const m = Math.round(d / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m} min ago`;
+    const h = Math.round(d / 3600e3);
+    if (h < 48) return `${h} hour${h === 1 ? '' : 's'} ago`;
+    return `${Math.round(d / 86400e3)} days ago`;
+  }
+  function viewPractice() {
+    const sets = SRS.practiceSets();
+    const leeches = SRS.leeches();
+    const card = (key, name, desc) => {
+      const list = sets[key];
+      return `<div class="card practice-card"><h2>${name} <span class="muted" style="font-weight:500">(${list.length})</span></h2>
+        <div class="muted" style="font-size:13px">${desc}</div>
+        <div class="tiles" style="margin:12px 0">${list.slice(0, 18).map((it) => tile(it, { small: true })).join('')}${list.length > 18 ? `<span class="faint" style="align-self:center">+${list.length - 18} more</span>` : ''}</div>
+        <button class="btn primary" data-practice="${key}" ${list.length ? '' : 'disabled'}>Practise${list.length ? ' ' + list.length : ''}</button></div>`;
+    };
+    view.innerHTML = `<div class="page">
+      <h1>Practice</h1>
+      <p class="muted" style="margin-top:-8px">Extra study with the same typed questions as reviews. Nothing here changes your SRS stages or review schedule.</p>
+      <div class="grid cols-2">
+        ${card('recentMistakes', 'Recent mistakes', 'Items you got wrong in a review in the last 24 hours.')}
+        ${card('recentLessons', 'Recent lessons', 'Items you learned in the last 48 hours.')}
+        ${card('currentLevel', `Current level (${SRS.state.level})`, 'Everything you have started from your current level.')}
+        ${card('leeches', 'Leeches', 'Items you keep getting wrong. See the full list below.')}
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>Leech list</h2>
+        <div class="muted" style="font-size:13px;margin-bottom:12px">An item becomes a leech after 2 or more wrong reviews that it hasn't recovered from with correct answers in a row.
+          Score = wrong reviews ÷ (current correct streak + 1)<sup>1.5</sup>. Try writing your own mnemonic in the item's notes, or reset it to a lesson.</div>
+        ${leeches.length ? `<div class="table-wrap"><table class="leech-table"><thead><tr><th>Item</th><th>Meaning</th><th>Stage</th><th>Wrong</th><th>Correct</th><th>Streak</th><th>Last wrong</th><th>Score</th></tr></thead><tbody>
+          ${leeches.map(({ it, p, score }) => `<tr data-item="${esc(it.id)}"><td>${tile(it, { small: true })}</td><td>${esc(shortMeaning(it))}</td><td>${stageChip(it)}</td>
+            <td>${p.w}</td><td>${p.c}</td><td>${p.k || 0}</td><td>${p.lw ? relTimePast(p.lw) : '—'}</td><td><b>${score.toFixed(1)}</b></td></tr>`).join('')}
+          </tbody></table></div>` : '<div class="faint">No leeches yet. Nice!</div>'}
+      </div></div>`;
+    const TITLES = { recentMistakes: 'Practice: recent mistakes', recentLessons: 'Practice: recent lessons', currentLevel: 'Practice: current level', leeches: 'Practice: leeches' };
+    $$('[data-practice]').forEach((b) => b.addEventListener('click', () => startPractice(sets[b.dataset.practice], TITLES[b.dataset.practice])));
+  }
+  viewPractice.refresh = () => viewPractice();
+
   // ------------------------------------------------------------------ browse
   let browseLevel = null;
   let browseQuery = '';
@@ -819,12 +1010,13 @@
         const g = group(t);
         if (!g.length) return '';
         if (t === 'sentence') return `<h3>${name} (${g.length})</h3><div class="list-rows">${g.map(rowFor).join('')}</div>`;
-        return `<h3>${name} (${g.length})</h3><div class="tiles">${g.map((it) => tile(it, { small: t === 'vocab' })).join('')}</div>`;
+        return `<h3>${name} (${g.length})</h3><div class="tiles">${g.map((it) => tile(it, { small: t === 'vocab', byStage: true })).join('')}</div>`;
       };
-      body.innerHTML = `<div class="grid" style="grid-template-columns: 1fr 1.4fr; align-items:start">
+      body.innerHTML = `<div class="grid browse-grid">
         <div class="card"><h2>Levels</h2><div class="level-grid">${cells}</div></div>
         <div class="card"><h2>Level ${lvl.n} · ${esc(lvl.name)} ${lvl.n > st.level ? '<span class="stage-chip sg-locked">Locked</span>' : ''}</h2>
-          ${section('kana', 'Kana')}${section('kanji', 'Kanji')}${section('vocab', 'Vocabulary')}${section('sentence', 'Phrases')}</div></div>`;
+          ${section('kana', 'Kana')}${section('kanji', 'Kanji')}${section('vocab', 'Vocabulary')}${section('sentence', 'Phrases')}
+          ${stageLegend()}</div></div>`;
       $$('.level-cell', body).forEach((c) => c.addEventListener('click', () => { browseLevel = +c.dataset.level; renderBody(); }));
     }
     viewBrowse.refresh = renderBody;
@@ -834,19 +1026,53 @@
   // ------------------------------------------------------------------ settings
   function viewSettings() {
     const s = SRS.state.settings;
+    const notificationsCard = isWeb ? `
+      <div class="card" style="margin-top:16px">
+        <h2>Review alerts</h2>
+        <div class="setting"><div><b>Notifications</b><div class="desc" id="push-desc">…</div></div>
+          <button class="btn" id="push-toggle" disabled>Turn on</button></div>
+      </div>` : `
+      <div class="card" style="margin-top:16px">
+        <h2>Notifications &amp; startup</h2>
+        <div class="setting"><div><b>Review notifications</b><div class="desc">A Windows notification when new reviews are ready. Click it to jump straight in.</div></div>
+          <input type="checkbox" id="notif" ${s.notifications ? 'checked' : ''}></div>
+        <div class="setting"><div><b>Keep running in the tray when closed</b><div class="desc">Closing the window hides the app in the system tray so notifications keep working. Quit from the tray icon.</div></div>
+          <input type="checkbox" id="tray" ${s.closeToTray ? 'checked' : ''}></div>
+        <div class="setting"><div><b>Start with Windows</b><div class="desc">Starts quietly in the tray when you sign in.</div></div>
+          <input type="checkbox" id="login" ${s.openAtLogin ? 'checked' : ''}></div>
+      </div>`;
+    const noVoiceHelp = isIOS
+      ? 'iPhone Settings → Accessibility → Spoken Content → Voices → Japanese, then download a voice. Reopen this app afterwards.'
+      : isWeb ? 'Install a Japanese text-to-speech voice in your system settings, then reload this page.'
+        : `Windows Settings → Time &amp; language → Language &amp; region → Add a language → Japanese, and make sure <b>Text-to-speech</b> is ticked.
+          Or open Speech settings → Manage voices → Add voices → Japanese. Restart this app afterwards.`;
     view.innerHTML = `<div class="page" style="max-width:800px">
       <h1>Settings</h1>
       <div class="card">
+        <h2>Sync &amp; account</h2>
+        <div id="sync-box"></div>
+      </div>
+      <div class="card" style="margin-top:16px">
         <h2>Study</h2>
         <div class="setting"><div><b>Lesson batch size</b><div class="desc">How many new items per lesson session before the quiz.</div></div>
           <input type="number" id="batch" min="1" max="30" value="${s.batchSize}" style="width:80px"></div>
         <div class="setting"><div><b>Daily lesson limit</b><div class="desc">0 = unlimited. Keeps your review pile manageable.</div></div>
           <input type="number" id="maxl" min="0" max="500" value="${s.maxLessonsPerDay}" style="width:80px"></div>
+        <div class="setting"><div><b>Review order</b><div class="desc">Which items come up first in reviews and practice.</div></div>
+          <select id="rorder"><option value="random">Random</option><option value="lowerFirst">Lower levels first</option><option value="typeFirst">Kana &amp; kanji before vocab &amp; phrases</option></select></div>
+        <div class="setting"><div><b>Back-to-back questions</b><div class="desc">Ask an item's meaning and reading one after the other instead of mixing them in randomly.</div></div>
+          <input type="checkbox" id="b2b" ${s.backToBack ? 'checked' : ''}></div>
+        <div class="setting"><div><b>Vacation mode</b><div class="desc">Pause reviews and lessons while you're away. When you come back, review times shift forward so nothing piles up.</div></div>
+          <button class="btn ${SRS.state.vacation ? 'primary' : ''}" id="vacation">${SRS.state.vacation ? 'End vacation' : 'Start vacation'}</button></div>
       </div>
+      ${notificationsCard}
       <div class="card" style="margin-top:16px">
         <h2>Appearance</h2>
         <div class="setting"><div><b>Theme</b></div>
-          <select id="theme"><option value="dark">Dark</option><option value="light">Light</option><option value="system">Match Windows</option></select></div>
+          <select id="theme"><option value="dark">Dark</option><option value="light">Light</option><option value="system">${isWeb ? 'Match system' : 'Match Windows'}</option></select></div>
+        <div class="setting"><div><b>Japanese font</b><div class="desc">Textbook shows characters the way they're handwritten: ロ with its little overhang, さ and き with separate strokes</div></div>
+          <select id="jpfont"><option value="print">Print</option><option value="textbook">Textbook (handwritten)</option></select></div>
+        <div class="font-preview jp" id="font-preview">ロ 口 さ き り ふ や 字</div>
       </div>
       <div class="card" style="margin-top:16px">
         <h2>Audio</h2>
@@ -854,20 +1080,25 @@
         <div class="setting"><div><b>Japanese voice</b></div>
           <div class="row"><select id="voice">${Speech.voices.map((v) => `<option ${v.name === s.voice ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
           <button class="btn small" id="test-voice">Test</button></div></div>` : `
-        <div class="setting"><div><b>No Japanese voice installed</b><div class="desc">Windows Settings → Time &amp; language → Language &amp; region → Add a language → Japanese, and make sure <b>Text-to-speech</b> is ticked.
-          Or open Speech settings → Manage voices → Add voices → Japanese. Restart this app afterwards.</div></div>
-          <button class="btn" id="speech-settings">Open speech settings</button></div>`}
+        <div class="setting"><div><b>No Japanese voice installed</b><div class="desc">${noVoiceHelp}</div></div>
+          ${isWeb ? '' : '<button class="btn" id="speech-settings">Open speech settings</button>'}</div>`}
         <div class="setting"><div><b>Autoplay audio</b><div class="desc">Play the reading after a correct reading answer and when a lesson opens.</div></div>
           <input type="checkbox" id="autoplay" ${s.autoplayAudio ? 'checked' : ''}></div>
       </div>
       <div class="card" style="margin-top:16px">
         <h2>Your data</h2>
-        <div class="setting"><div><b>Progress file</b><div class="desc">Saved automatically to %APPDATA%\\KanaKanjiSRS\\progress.json, with a backup each day (last 14 kept).</div></div>
-          <button class="btn" id="open-folder">Open folder</button></div>
-        <div class="setting"><div><b>Export / import</b><div class="desc">Move your progress to another PC, or restore a backup.</div></div>
+        ${isWeb ? '' : `<div class="setting"><div><b>Progress folder</b><div class="desc">Saved automatically, with a backup each day (last 14 kept). Point this at a OneDrive or Dropbox folder to sync between PCs, but only have the app open on one PC at a time.
+          <div class="data-path" id="data-path">…</div></div></div>
+          <div class="row" style="flex-wrap:nowrap"><button class="btn" id="open-folder">Open</button><button class="btn" id="change-folder">Change…</button><button class="btn hidden" id="default-folder">Use default</button></div></div>`}
+        <div class="setting"><div><b>Export / import</b><div class="desc">Save a copy of your progress to a file, or restore one.</div></div>
           <div class="row"><button class="btn" id="export">Export…</button><button class="btn" id="import">Import…</button></div></div>
         <div class="setting"><div><b>Reset all progress</b><div class="desc">Start over from level 1. Your notes are kept.</div></div>
           <button class="btn danger" id="reset">Reset…</button></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>What's new <span class="muted" style="font-weight:500" id="app-version"></span></h2>
+        <div class="muted" style="font-size:13px;margin-bottom:10px">Every version, newest first. Click a version to expand or collapse it.</div>
+        <div id="changelog" class="changelog"><span class="faint">Loading…</span></div>
       </div>
       <div class="card" style="margin-top:16px">
         <h2>Credits &amp; licenses</h2>
@@ -876,35 +1107,92 @@
           Vocabulary: JLPT lists by Jonathan Waller (CC BY) via <a href="#" data-link="https://github.com/jamsinclair/open-anki-jlpt-decks">open-anki-jlpt-decks</a>, plus JMdict © EDRDG (CC BY-SA 4.0) via jmdict-simplified.<br>
           Phrases: <a href="#" data-link="https://tatoeba.org">Tatoeba</a> (CC BY 2.0 FR). Readings are generated with kuromoji.js.<br>
           Stroke order: <a href="#" data-link="https://kanjivg.tagaini.net">KanjiVG</a> © Ulrich Apel (CC BY-SA 3.0).
+          ${isWeb ? '<br>Textbook font: <a href="#" data-link="https://github.com/fontworks-fonts/Klee">Klee One</a> © The Klee Project Authors (SIL OFL 1.1).' : ''}
         </div>
       </div></div>`;
     $('#theme').value = s.theme;
-    const set = (k, v) => { s[k] = v; SRS.save(); updateNav(); };
+    $('#jpfont').value = s.jpFont;
+    const set = (k, v) => { SRS.setSetting(k, v); updateNav(); };
+    renderSyncBox();
+    renderPushSetting();
     $('#batch').onchange = (e) => set('batchSize', Math.min(30, Math.max(1, +e.target.value || 5)));
     $('#maxl').onchange = (e) => set('maxLessonsPerDay', Math.max(0, +e.target.value || 0));
     $('#theme').onchange = (e) => { set('theme', e.target.value); applyTheme(); };
+    $('#jpfont').onchange = (e) => { set('jpFont', e.target.value); applyTheme(); };
     $('#autoplay').onchange = (e) => set('autoplayAudio', e.target.checked);
+    window.api.about().then(({ version, changelog }) => {
+      if (!$('#changelog')) return; // left Settings meanwhile
+      $('#app-version').textContent = `· version ${version}`;
+      $('#changelog').innerHTML = changelog ? changelogHTML(changelog) : '<span class="faint">No changelog available.</span>';
+    });
+    $('#rorder').value = s.reviewOrder;
+    $('#rorder').onchange = (e) => set('reviewOrder', e.target.value);
+    $('#b2b').onchange = (e) => set('backToBack', e.target.checked);
+    $('#vacation').onclick = () => {
+      if (SRS.state.vacation) { SRS.endVacation(); toast('Vacation over. Welcome back!'); }
+      else { SRS.startVacation(); toast('Vacation mode on. Reviews are paused.'); }
+      updateNav();
+      viewSettings();
+    };
+    const setPref = (k, v) => { set(k, v); pushAppPrefs(); };
+    if (!isWeb) {
+      $('#notif').onchange = (e) => setPref('notifications', e.target.checked);
+      $('#tray').onchange = (e) => setPref('closeToTray', e.target.checked);
+      $('#login').onchange = (e) => setPref('openAtLogin', e.target.checked);
+    }
+    const showDir = async () => {
+      if (isWeb) return;
+      const d = await window.api.getDataDir();
+      if (!$('#data-path')) return; // left Settings meanwhile
+      $('#data-path').textContent = d.path + (d.isDefault ? '  (default)' : '');
+      $('#default-folder').classList.toggle('hidden', d.isDefault);
+    };
+    showDir();
+    const moveTo = async (useDefault) => {
+      const pick = await window.api.chooseDataDir(useDefault);
+      if (!pick) return;
+      if (pick.error) { toast(pick.error); return; }
+      if (pick.same) { toast("That's already your progress folder"); return; }
+      let mode = 'move';
+      if (pick.existing) {
+        const when = new Date(pick.existing.savedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        mode = await choose('That folder already has progress',
+          `It holds a save at <b>level ${pick.existing.level}</b>, last saved ${esc(when)}.<br>Use that save, or replace it with the progress you have open now (level ${SRS.state.level})?`,
+          [{ label: 'Cancel', value: null }, { label: 'Replace it with mine', value: 'move' }, { label: 'Use that save', value: 'use', primary: true }]);
+        if (!mode) return;
+      }
+      SRS.flush();
+      const res = await window.api.applyDataDir(pick.path, mode, SRS.state);
+      if (mode === 'use' && res) { SRS.setState(res); applyTheme(); }
+      toast(mode === 'use' ? 'Loaded the progress from that folder' : 'Progress moved');
+      go('settings');
+    };
+    if (!isWeb) {
+      $('#change-folder').onclick = () => moveTo(false);
+      $('#default-folder').onclick = () => moveTo(true);
+      $('#open-folder').onclick = () => window.api.openDataFolder();
+    }
     if ($('#voice')) {
       $('#voice').onchange = (e) => set('voice', e.target.value);
       $('#test-voice').onclick = () => Speech.speak('こんにちは。日本語を勉強しましょう。');
     }
     if ($('#speech-settings')) $('#speech-settings').onclick = () => window.api.openSpeechSettings();
-    $('#open-folder').onclick = () => window.api.openDataFolder();
     $('#export').onclick = async () => { if (await window.api.exportProgress(SRS.state)) toast('Progress exported'); };
     $('#import').onclick = async () => {
       let data;
       try { data = await window.api.importProgress(); } catch (e) { toast('Could not read that file'); return; }
       if (!data) return;
       if (!data.items || !data.settings) { toast("That doesn't look like a progress file"); return; }
-      if (!confirm('Replace your current progress with the imported file?')) return;
+      if (!confirm(`Replace your current progress with the imported file?${Sync.signedIn ? ' Your other synced devices will switch to it too.' : ''}`)) return;
       SRS.setState(data);
       applyTheme();
       toast('Progress imported');
       go('dashboard');
     };
     $('#reset').onclick = () => {
-      if (!confirm('Reset ALL progress and start from level 1?')) return;
-      if (!confirm('Are you sure? This cannot be undone (daily backups are still in the data folder).')) return;
+      if (!confirm(`Reset ALL progress and start from level 1?${Sync.signedIn ? ' This resets your other synced devices too.' : ''}`)) return;
+      if (!confirm(isWeb ? 'Are you sure? This cannot be undone. Export a copy first if you might want it back.'
+        : 'Are you sure? This cannot be undone (daily backups are still in the data folder).')) return;
       const fresh = SRS.newState();
       fresh.notes = SRS.state.notes;
       fresh.synonyms = SRS.state.synonyms;
@@ -916,15 +1204,158 @@
     $$('[data-link]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); window.api.openLink(a.dataset.link); }));
   }
 
-  const VIEWS = { dashboard: viewDashboard, lessons: viewLessons, reviews: viewReviews, browse: viewBrowse, settings: viewSettings };
+  // ------------------------------------------------------------------ sync & alerts (Settings)
+  function syncLine() {
+    const st = Sync.status;
+    if (st.state === 'syncing') return 'Syncing…';
+    if (st.state === 'offline') return "Offline. It'll sync when you're back online.";
+    if (st.state === 'error') return `Couldn't sync: ${st.error}`;
+    return st.lastSync ? `Last synced ${relTimePast(st.lastSync)}` : 'Not synced yet';
+  }
+  function friendlyAuthError(e) {
+    if (e.status === 429 || /rate limit/i.test(e.message)) return 'Too many attempts. Wait a few minutes and try again.';
+    if (/not confirmed/i.test(e.message)) return 'Confirm your email first: click the link in the email Supabase sent, then sign in here.';
+    if (/invalid login|invalid credentials/i.test(e.message)) return 'Wrong email or password.';
+    if (/already registered|already exists/i.test(e.message)) return 'That email already has an account. Use Sign in instead.';
+    if (/signups not allowed/i.test(e.message)) return 'New accounts are turned off. Use Sign in.';
+    if (!navigator.onLine) return "You're offline.";
+    return e.message;
+  }
+  function renderSyncBox() {
+    const box = $('#sync-box');
+    if (!box) return;
+    if (Sync.signedIn) {
+      box.dataset.mode = 'in';
+      box.innerHTML = `<div class="setting"><div><b>Signed in as ${esc(Sync.email)}</b><div class="desc" id="sync-line">${esc(syncLine())}</div></div>
+        <div class="row" style="flex-wrap:nowrap"><button class="btn" id="sync-now">Sync now</button><button class="btn" id="sync-out">Sign out</button></div></div>`;
+      $('#sync-now').onclick = () => Sync.syncNow();
+      $('#sync-out').onclick = async () => {
+        if (!confirm('Sign out? Your progress stays on this device but stops syncing.')) return;
+        await Sync.signOut();
+        renderSyncBox();
+        renderPushSetting();
+      };
+      return;
+    }
+    box.dataset.mode = 'out';
+    box.innerHTML = `<div class="desc">Sign in to sync your progress between ${isWeb ? 'this phone and your PC' : 'this PC and your iPhone'}.
+        First time? Enter your email and a password, then <b>Create account</b>.</div>
+      <form class="sync-form" id="sync-form" autocomplete="on">
+        <input class="text-input" id="sync-email" name="email" type="email" autocomplete="username" autocapitalize="none" placeholder="Email">
+        <input class="text-input" id="sync-pass" name="password" type="password" autocomplete="current-password" placeholder="Password">
+        <div class="row"><button class="btn primary" id="sync-in" type="submit">Sign in</button><button class="btn" id="sync-new" type="button">Create account</button></div>
+      </form>
+      <div class="desc sync-msg" id="sync-msg">${esc(Sync.status.error || '')}</div>`;
+    const msg = (t) => { const m = $('#sync-msg'); if (m) m.textContent = t; };
+    const email = $('#sync-email'), pass = $('#sync-pass');
+    [email, pass].forEach((el) => el.addEventListener('keydown', (e) => e.stopPropagation()));
+    const read = () => {
+      const v = { email: email.value.trim(), password: pass.value };
+      if (!/^\S+@\S+\.\S+$/.test(v.email)) { msg('Enter your email address.'); return null; }
+      if (v.password.length < 8) { msg('Passwords need at least 8 characters.'); return null; }
+      return v;
+    };
+    const busy = (on) => { $('#sync-in').disabled = on; $('#sync-new').disabled = on; };
+    $('#sync-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const v = read();
+      if (!v) return;
+      busy(true);
+      msg('Signing in…');
+      try { await Sync.signIn(v.email, v.password); toast('Signed in. Your progress is syncing.'); renderSyncBox(); renderPushSetting(); }
+      catch (err) { msg(friendlyAuthError(err)); busy(false); }
+    };
+    $('#sync-new').onclick = async () => {
+      const v = read();
+      if (!v) return;
+      busy(true);
+      msg('Creating your account…');
+      try {
+        if (await Sync.signUp(v.email, v.password)) { toast('Account created. Your progress is syncing.'); renderSyncBox(); renderPushSetting(); }
+        else { msg('Account created. Check your email and click the confirmation link, then come back and press Sign in.'); busy(false); }
+      } catch (err) { msg(friendlyAuthError(err)); busy(false); }
+    };
+  }
+  function onSyncStatus() {
+    const box = $('#sync-box');
+    if (box) {
+      if ((box.dataset.mode === 'in') !== Sync.signedIn) renderSyncBox();
+      else if ($('#sync-line')) $('#sync-line').textContent = syncLine();
+    }
+  }
+  async function renderPushSetting() {
+    const btn = $('#push-toggle');
+    if (!btn) return;
+    const s = Sync.signedIn ? await Sync.pushStatus() : 'signed-out';
+    if (!$('#push-toggle')) return;
+    const QUIET = ' Quiet from 10 pm to 8 am.';
+    $('#push-desc').textContent = {
+      'signed-out': 'Sign in above first. Alerts are sent by the sync service.',
+      'needs-install': 'Add this app to your Home Screen first: in Safari tap Share, then "Add to Home Screen". Open it from there and come back here.',
+      unsupported: "This browser can't receive alerts.",
+      denied: 'Notifications are blocked for this app. Allow them in iPhone Settings → Notifications → Kana Kanji.',
+      off: 'Get a notification on this phone when new reviews are ready.' + QUIET,
+      on: "On. You'll get a notification when new reviews are ready." + QUIET,
+    }[s];
+    btn.textContent = s === 'on' ? 'Turn off' : 'Turn on';
+    btn.disabled = s !== 'on' && s !== 'off';
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        if (s === 'on') { await Sync.disablePush(); toast('Review alerts off'); }
+        else { await Sync.enablePush(); toast('Review alerts on'); }
+      } catch (e) { toast(e.message, 5000); }
+      renderPushSetting();
+    };
+  }
+
+  function pushAppPrefs() {
+    const s = SRS.state.settings;
+    window.api.setAppPrefs({ notifications: s.notifications, closeToTray: s.closeToTray, openAtLogin: s.openAtLogin });
+  }
+
+  const VIEWS = { dashboard: viewDashboard, lessons: viewLessons, reviews: viewReviews, practice: viewPractice, browse: viewBrowse, settings: viewSettings };
 
   // ------------------------------------------------------------------ boot
   (async () => {
     await SRS.init();
     applyTheme();
     Speech.init();
-    go('dashboard');
-    setInterval(updateNav, 60e3);
+    // Opened from a review alert (…/#reviews)
+    const start = location.hash.slice(1);
+    if (start) history.replaceState(null, '', location.pathname + location.search);
+    go(VIEWS[start] ? start : 'dashboard');
+    // Landed here from the account confirmation email
+    if (/type=signup/.test(start)) toast('Email confirmed. Sign in under Settings → Sync & account.', 6000);
+    else if (/error_description=/.test(start)) toast(decodeURIComponent(start.match(/error_description=([^&]*)/)[1].replace(/\+/g, ' ')), 6000);
+    pushAppPrefs();
+    window.api.onNavigate((name) => { if (VIEWS[name]) go(name); });
+
+    Sync.onConflict = ({ local, remote }) => choose('Two sets of progress',
+      `This ${isWeb ? 'device' : 'PC'} has progress up to <b>level ${local.level}</b>, and your account already has synced progress up to <b>level ${remote.level}</b>.
+      Which should be kept? "Combine both" keeps the most recent answer for every item.`,
+      [{ label: 'Cancel', value: null }, { label: 'Combine both', value: 'merge' },
+        { label: `Keep this ${isWeb ? 'device' : 'PC'}'s`, value: 'device' }, { label: 'Keep synced', value: 'cloud', primary: true }]);
+    Sync.onRemoteChange = () => {
+      applyTheme();
+      updateNav();
+      if (!$('.quiz') && $('#modal').classList.contains('hidden') && VIEWS[current.name] && VIEWS[current.name].refresh) VIEWS[current.name].refresh();
+    };
+    Sync.subscribe(onSyncStatus);
+    Sync.start();
+    let lastReviews = 0;
+    const tick = () => {
+      updateNav();
+      const n = SRS.reviewQueue().length;
+      const lessons = Math.min(SRS.lessonQueue().length, SRS.lessonsLeftToday());
+      window.api.setTrayInfo(SRS.state.vacation ? 'Kana Kanji SRS · vacation mode'
+        : `Kana Kanji SRS · ${n} review${n === 1 ? '' : 's'}, ${lessons} lesson${lessons === 1 ? '' : 's'}`);
+      // Notify when a new batch of reviews arrives (they land on the hour)
+      if (n > lastReviews && n > 0) window.api.notify('Reviews ready', `${n} review${n === 1 ? ' is' : 's are'} waiting. Click to start.`);
+      lastReviews = n;
+    };
+    tick();
+    setInterval(tick, 60e3);
   })();
 
   void isJapanese;

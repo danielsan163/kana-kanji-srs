@@ -1,13 +1,15 @@
 {
   "name": "kana-kanji-srs",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "SRS study app for hiragana, katakana, kanji, vocabulary and phrases",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build-data": "node scripts/build-data.js && node scripts/build-examples.js",
-    "test": "node test/grading.test.js",
-    "dist": "electron-builder --win"
+    "test": "node test/grading.test.js && node test/sync.test.js",
+    "dist": "electron-builder --win",
+    "build-web": "node scripts/build-web.js",
+    "serve-web": "node scripts/build-web.js && node scripts/serve-web.js"
   },
   "keywords": [
     "japanese",
@@ -22,6 +24,7 @@
   "license": "GPL-3.0-only",
   "type": "commonjs",
   "devDependencies": {
+    "@fontsource/klee-one": "^5.3.1",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "kuromoji": "^0.1.2"
@@ -37,6 +40,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "CHANGELOG.md",
       "app/**/*",
       "build/icon.png",
       "!scripts",
