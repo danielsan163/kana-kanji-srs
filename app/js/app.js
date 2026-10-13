@@ -1126,6 +1126,8 @@
       </div>
       <div class="card" style="margin-top:16px">
         <h2>What's new <span class="muted" style="font-weight:500" id="app-version"></span></h2>
+        ${window.api.checkForUpdate ? `<div class="row" style="margin-bottom:10px"><button class="btn small" id="check-update">Check for updates</button>
+          <button class="btn small hidden" id="force-update">Force update</button><span class="desc" id="update-msg"></span></div>` : ''}
         <div class="muted" style="font-size:13px;margin-bottom:10px">Every version, newest first. Click a version to expand or collapse it.</div>
         <div id="changelog" class="changelog"><span class="faint">Loading…</span></div>
       </div>
@@ -1160,6 +1162,20 @@
       $('#app-version').textContent = `· version ${version}`;
       $('#changelog').innerHTML = changelog ? changelogHTML(changelog) : '<span class="faint">No changelog available.</span>';
     });
+    if ($('#check-update')) {
+      const umsg = (t) => { if ($('#update-msg')) $('#update-msg').textContent = t; };
+      $('#check-update').onclick = async () => {
+        umsg('Checking…');
+        try {
+          const r = await window.api.checkForUpdate();
+          if (!r.newer) { umsg(`You're up to date (${r.current.build}).`); return; }
+          umsg(`Updating to ${r.latest.version}. The app reloads when it's ready.`);
+          // If it hasn't switched over after a while, offer the manual way
+          setTimeout(() => { if ($('#force-update')) { $('#force-update').classList.remove('hidden'); umsg('Still on the old version? Tap Force update.'); } }, 20e3);
+        } catch { umsg("Couldn't reach the server. Are you online?"); }
+      };
+      $('#force-update').onclick = () => { umsg('Reloading…'); window.api.forceUpdate(); };
+    }
     $('#rorder').value = s.reviewOrder;
     $('#rorder').onchange = (e) => set('reviewOrder', e.target.value);
     $('#b2b').onchange = (e) => set('backToBack', e.target.checked);

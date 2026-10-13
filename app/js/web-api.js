@@ -59,15 +59,37 @@
   // Offline support + push alerts. Service workers need https (or localhost).
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker not registered:', e));
-    // A new version finished installing: reload into it, unless you're in the middle of a lesson or review
+    // A new version finished installing: reload into it, or as soon as you finish the lesson or review you're in
     const hadController = !!navigator.serviceWorker.controller;
     let reloading = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController || reloading || document.querySelector('.quiz')) return;
+    const reloadWhenFree = () => {
+      if (reloading) return;
+      if (document.querySelector('.quiz')) { setTimeout(reloadWhenFree, 3000); return; }
       reloading = true;
       if (window.SRS && SRS.state) SRS.flush();
       location.reload();
-    });
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadWhenFree(); });
+    // iPhone often resumes a Home Screen app instead of restarting it, so also look for updates
+    // whenever the app comes back to the front (and every half hour while it's open)
+    const lookForUpdate = () => navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') lookForUpdate(); });
+    setInterval(lookForUpdate, 30 * 60e3);
+
+    const running = fetch('version.json').then((r) => r.json()).catch(() => ({ version: '?', build: '?' })); // from the offline copy
+    /** Compare the running build with the one on the server and start updating if they differ. */
+    window.api.checkForUpdate = async () => {
+      const [current, latest] = await Promise.all([running, fetch('version.json?check=' + Date.now(), { cache: 'no-store' }).then((r) => r.json())]);
+      if (latest.build !== current.build) await lookForUpdate();
+      return { current, latest, newer: latest.build !== current.build };
+    };
+    /** Last resort: drop the offline copy and load everything fresh. Progress (stored separately) is untouched. */
+    window.api.forceUpdate = async () => {
+      if (window.SRS && SRS.state) SRS.flush();
+      for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+      for (const k of await caches.keys()) if (k.startsWith('kks-')) await caches.delete(k);
+      location.reload();
+    };
     // Tapping an alert while the app is already open
     navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.navigate && navigate) navigate(e.data.navigate); });
   }
