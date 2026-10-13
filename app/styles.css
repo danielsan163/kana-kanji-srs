@@ -44,6 +44,7 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
+html, body { height: var(--app-h, 100%); overflow: hidden; } /* --app-h: visible height (above the iPhone keyboard) */
 body { background: var(--bg); color: var(--text); font-family: var(--ui); font-size: 15px; display: flex; flex-direction: column; }
 button { font: inherit; color: inherit; cursor: pointer; }
 .jp { font-family: var(--jp); }
@@ -493,3 +494,19 @@ mark.hl { background: none; color: var(--vocab-hl); font-weight: 700; border-bot
 .theme-card .tc-stages { display: flex; gap: 3px; }
 .theme-card .tc-stages i { flex: 1; height: 6px; border-radius: 2px; }
 .theme-card.split { background: linear-gradient(135deg, #16161d 50%, #f4f4f7 50%); }
+
+/* iPhone keyboard open: compact the question card and hide the tab bar so everything fits above it */
+@media (max-width: 700px) {
+  body.kb-open nav { display: none; }
+  body.kb-open main { padding-bottom: 12px; }
+  body.kb-open .topbar { padding-top: calc(4px + env(safe-area-inset-top)); padding-bottom: 4px; }
+  body.kb-open .quiz-top { margin-bottom: 6px; }
+  body.kb-open .subject { min-height: 0; padding: 12px; }
+  body.kb-open .subject .char { font-size: 68px; }
+  body.kb-open .subject .char.len-2 { font-size: 60px; }
+  body.kb-open .subject .char.len-3 { font-size: 50px; }
+  body.kb-open .subject .char.len-4 { font-size: 42px; }
+  body.kb-open .subject .char.len-long { font-size: 32px; }
+  body.kb-open .subject .char.sentence { font-size: 24px; }
+  body.kb-open .prompt-bar { margin-top: 8px; padding: 8px; }
+}

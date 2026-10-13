@@ -41,6 +41,20 @@
   });
   window.addEventListener('beforeunload', () => SRS.flush());
 
+  // iPhone: when the keyboard opens, iOS scrolls the whole page up (pushing the card under the camera
+  // island). Instead, size the app to the area above the keyboard and keep the page itself pinned.
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const fit = () => {
+      document.documentElement.style.setProperty('--app-h', `${Math.round(vv.height)}px`);
+      document.body.classList.toggle('kb-open', vv.height < window.innerHeight * 0.8);
+      if (window.scrollY || vv.offsetTop) window.scrollTo(0, 0);
+    };
+    vv.addEventListener('resize', fit);
+    vv.addEventListener('scroll', fit);
+    fit();
+  }
+
   function updateNav() {
     const lessons = Math.min(SRS.lessonQueue().length, SRS.lessonsLeftToday());
     const reviews = SRS.reviewQueue().length;
@@ -780,7 +794,8 @@
         if (v !== input.value) input.value = v;
       });
       $('#submit').onclick = submit;
-      input.focus();
+      view.scrollTop = 0;
+      input.focus({ preventScroll: true });
     }
 
     function selfGrade(ok) {

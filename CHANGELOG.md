@@ -10,6 +10,7 @@
 
 ### Changed
 - **The iPhone version's offline copy repairs itself** if something clears it, such as another site on the same github.io address.
+- **Fixed (iPhone): the question card no longer slides under the camera island** when the keyboard opens. The app fits itself above the keyboard, with a slightly smaller card and the tab bar hidden while you type.
 - **iPhone updates arrive reliably.** The app checks for a new version every time it comes to the front, not only on a fresh start, and always asks the server rather than a cached copy.
 - **Check for updates** button in Settings → What's new (iPhone), with a Force update fallback that reloads the app fresh without touching your progress.
 
