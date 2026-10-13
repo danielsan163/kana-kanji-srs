@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0 (unreleased)
+
+### New
+- **Themes** (Settings → Appearance). Pick from a grid of preview cards; each theme recolours the whole app, including item types and SRS stage colours. Themes are per device.
+  - **Evangelion:** Shinji (Unit-01 purple and green), Asuka (Unit-02 red and orange) and Rei (Unit-00 blue and white, light). Headings use a heavy serif, like the show's title cards.
+  - **Retro consoles:** NES (dark grey and red), SNES (light grey and purple) and SFC (Super Famicom grey with red, yellow, blue and green). Headings, buttons and tabs use the Press Start 2P pixel font, with a switch to turn it off. Japanese study text keeps your normal font.
+  - Dark, Light and Match system are still there.
+
+### Changed
+- **The iPhone version's offline copy repairs itself** if something clears it, such as another site on the same github.io address.
+
 ## 1.1.0 (October 12, 2026)
 
 ### New

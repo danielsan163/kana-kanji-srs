@@ -7,6 +7,7 @@ const PRECACHE = [
   'js/kana.js', 'js/web-api.js', 'js/srs.js', 'js/sync.js', 'js/app.js',
   'data/data.js', 'data/strokes.json', 'data/examples.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'fonts/klee-one.css',
+  'fonts/pixel.css', 'fonts/press-start-2p.woff2',
 ];
 
 self.addEventListener('install', (e) => {
@@ -18,8 +19,9 @@ self.addEventListener('activate', (e) => {
     .then(() => self.clients.claim()));
 });
 
-// Cache first for the app's own files (font pieces are cached as they're first used);
-// everything else (sync requests) goes straight to the network.
+// Cache first for the app's own files. Anything fetched from the network is cached too, so the
+// offline copy rebuilds itself if something cleared it (another site on the same github.io address
+// can wipe caches). Sync requests go to another address and straight to the network.
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
@@ -27,7 +29,7 @@ self.addEventListener('fetch', (e) => {
     const hit = await cache.match(e.request, { ignoreSearch: true });
     if (hit) return hit;
     const res = await fetch(e.request);
-    if (res.ok && url.pathname.includes('/fonts/')) cache.put(e.request, res.clone());
+    if (res.ok && res.type === 'basic') cache.put(e.request, res.clone());
     return res;
   }));
 });

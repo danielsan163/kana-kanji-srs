@@ -60,11 +60,31 @@
     toastTimer = setTimeout(() => t.classList.add('hidden'), ms);
   }
 
+  // Themes: each has a base mode (dark/light palette underneath) and optional typography
+  const THEMES = [
+    { id: 'dark', name: 'Dark', mode: 'dark' },
+    { id: 'light', name: 'Light', mode: 'light' },
+    { id: 'system', name: isWeb ? 'Match system' : 'Match Windows', sub: 'Dark or light' },
+    { id: 'shinji', name: 'Shinji', sub: 'Eva Unit-01', mode: 'dark', eva: true },
+    { id: 'asuka', name: 'Asuka', sub: 'Eva Unit-02', mode: 'dark', eva: true },
+    { id: 'rei', name: 'Rei', sub: 'Eva Unit-00', mode: 'light', eva: true },
+    { id: 'nes', name: 'NES', sub: 'Pixel font', mode: 'dark', retro: true },
+    { id: 'snes', name: 'SNES', sub: 'Pixel font', mode: 'light', retro: true },
+    { id: 'sfc', name: 'SFC', sub: 'Super Famicom', mode: 'light', retro: true },
+  ];
+  const themeById = (id) => THEMES.find((t) => t.id === id && t.mode) || THEMES[0];
   function applyTheme() {
-    const pref = SRS.state.settings.theme;
-    const dark = pref === 'system' ? matchMedia('(prefers-color-scheme: dark)').matches : pref !== 'light';
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    document.documentElement.dataset.jpfont = SRS.state.settings.jpFont;
+    const s = SRS.state.settings;
+    const id = s.theme === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : s.theme;
+    const t = themeById(id);
+    const root = document.documentElement.dataset;
+    root.theme = t.id;
+    root.mode = t.mode;
+    root.pixel = t.retro && s.pixelFont !== false ? 'on' : 'off';
+    root.eva = t.eva ? 'on' : 'off';
+    root.jpfont = s.jpFont;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
   }
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 
@@ -1068,8 +1088,17 @@
       ${notificationsCard}
       <div class="card" style="margin-top:16px">
         <h2>Appearance</h2>
-        <div class="setting"><div><b>Theme</b></div>
-          <select id="theme"><option value="dark">Dark</option><option value="light">Light</option><option value="system">${isWeb ? 'Match system' : 'Match Windows'}</option></select></div>
+        <div><b>Theme</b><div class="desc">Applies to this ${isWeb ? 'device' : 'PC'} only.</div></div>
+        <div class="theme-grid" id="theme-grid">${THEMES.map((t) => {
+          const look = t.mode ? `data-theme="${t.id}" data-mode="${t.mode}"` : '';
+          return `<button class="theme-card ${t.mode ? '' : 'split'} ${s.theme === t.id ? 'selected' : ''}" data-pick-theme="${t.id}" ${look} aria-pressed="${s.theme === t.id}">
+            <div class="tc-name" ${t.mode ? '' : 'style="color:#fff;mix-blend-mode:difference"'}>${esc(t.name)}</div><div class="tc-sub" ${t.mode ? '' : 'style="color:#999"'}>${esc(t.sub || (t.mode === 'dark' ? 'Default dark' : 'Default light'))}</div>
+            ${t.mode ? `<div class="tc-row"><span class="tc-tile">字</span><span class="tc-btn">Reviews</span></div>
+            <div class="tc-stages">${['apprentice', 'guru', 'master', 'enlightened', 'burned'].map((g) => `<i style="background:var(--st-${g})"></i>`).join('')}</div>` : ''}
+          </button>`;
+        }).join('')}</div>
+        <div class="setting ${themeById(s.theme).retro ? '' : 'hidden'}" id="pixel-row"><div><b>Pixel fonts</b><div class="desc">Use the pixel font for headings and buttons in the NES, SNES and SFC themes.</div></div>
+          <input type="checkbox" id="pixel" ${s.pixelFont !== false ? 'checked' : ''}></div>
         <div class="setting"><div><b>Japanese font</b><div class="desc">Textbook shows characters the way they're handwritten: ロ with its little overhang, さ and き with separate strokes</div></div>
           <select id="jpfont"><option value="print">Print</option><option value="textbook">Textbook (handwritten)</option></select></div>
         <div class="font-preview jp" id="font-preview">ロ 口 さ き り ふ や 字</div>
@@ -1107,17 +1136,23 @@
           Vocabulary: JLPT lists by Jonathan Waller (CC BY) via <a href="#" data-link="https://github.com/jamsinclair/open-anki-jlpt-decks">open-anki-jlpt-decks</a>, plus JMdict © EDRDG (CC BY-SA 4.0) via jmdict-simplified.<br>
           Phrases: <a href="#" data-link="https://tatoeba.org">Tatoeba</a> (CC BY 2.0 FR). Readings are generated with kuromoji.js.<br>
           Stroke order: <a href="#" data-link="https://kanjivg.tagaini.net">KanjiVG</a> © Ulrich Apel (CC BY-SA 3.0).
+          <br>Pixel font: <a href="#" data-link="https://github.com/codeman38/PressStart2P">Press Start 2P</a> © The Press Start 2P Project Authors (SIL OFL 1.1).
           ${isWeb ? '<br>Textbook font: <a href="#" data-link="https://github.com/fontworks-fonts/Klee">Klee One</a> © The Klee Project Authors (SIL OFL 1.1).' : ''}
         </div>
       </div></div>`;
-    $('#theme').value = s.theme;
     $('#jpfont').value = s.jpFont;
     const set = (k, v) => { SRS.setSetting(k, v); updateNav(); };
     renderSyncBox();
     renderPushSetting();
     $('#batch').onchange = (e) => set('batchSize', Math.min(30, Math.max(1, +e.target.value || 5)));
     $('#maxl').onchange = (e) => set('maxLessonsPerDay', Math.max(0, +e.target.value || 0));
-    $('#theme').onchange = (e) => { set('theme', e.target.value); applyTheme(); };
+    $$('[data-pick-theme]').forEach((b) => b.addEventListener('click', () => {
+      set('theme', b.dataset.pickTheme);
+      applyTheme();
+      $$('[data-pick-theme]').forEach((x) => { x.classList.toggle('selected', x === b); x.setAttribute('aria-pressed', x === b); });
+      $('#pixel-row').classList.toggle('hidden', !themeById(b.dataset.pickTheme).retro);
+    }));
+    $('#pixel').onchange = (e) => { set('pixelFont', e.target.checked); applyTheme(); };
     $('#jpfont').onchange = (e) => { set('jpFont', e.target.value); applyTheme(); };
     $('#autoplay').onchange = (e) => set('autoplayAudio', e.target.checked);
     window.api.about().then(({ version, changelog }) => {
