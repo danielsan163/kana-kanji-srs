@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const kuromoji = require('kuromoji');
+const { readingMatches, canFixReading, commonReadings } = require('./reading-check');
 
 const RAW = path.join(__dirname, '..', 'raw');
 const OUT = path.join(__dirname, '..', 'app', 'data');
@@ -54,9 +55,14 @@ const items = [];
 function kanaItem(c, romaji, script, lvl) {
   const hira = kataToHira(c);
   const alt = KANA_ALT[hira] || KANA_ALT[c] || [];
-  items.push({ id: 'kana:' + c, t: 'kana', c, script, romaji: [romaji, ...alt], lvl });
+  const mn = mnemonicFor(c, romaji, (ch) => BASIC_ROMAJI[ch]);
+  const doodle = DOODLES[c] ? { dd: DOODLES[c].join(''), dc: CAPTIONS[c] } : {};
+  items.push({ id: 'kana:' + c, t: 'kana', c, script, romaji: [romaji, ...alt], lvl, ...(mn ? { mn } : {}), ...doodle });
 }
 levels.push({ n: 1, name: 'Hiragana', kind: 'kana' });
+const { mnemonicFor } = require('./kana-mnemonics');
+const { DOODLES, CAPTIONS } = require('./kana-doodles');
+const BASIC_ROMAJI = Object.fromEntries([...HIRA_BASIC, ...HIRA_DAKU].flatMap(([c, r]) => [[c, r], [hiraToKata(c), r]]));
 for (const [c, r] of [...HIRA_BASIC, ...HIRA_DAKU]) kanaItem(c, r, 'hiragana', 1);
 levels.push({ n: 2, name: 'Katakana', kind: 'kana' });
 for (const [c, r] of [...HIRA_BASIC, ...HIRA_DAKU]) kanaItem(hiraToKata(c), r, 'katakana', 2);
@@ -71,6 +77,43 @@ const kanjiList = Object.entries(kd)
   .filter(([, v]) => v.jlpt_new)
   .sort(([ca, a], [cb, b]) =>
     (b.jlpt_new - a.jlpt_new) || ((a.freq || 9999) - (b.freq || 9999)) || (a.strokes - b.strokes) || ca.localeCompare(cb));
+
+// Components (KanjiVG kvg:element on the kanji's top-level groups), each with a short meaning
+const RADICAL_NAMES = {
+  '氵': 'water', '亻': 'person', '扌': 'hand', '忄': 'heart', '艹': 'grass', '辶': 'movement', '⻌': 'movement', '刂': 'knife',
+  '阝': 'hill / village', '犭': 'dog', '礻': 'altar', '衤': 'clothing', '灬': 'fire', '冫': 'ice', '宀': 'roof', '冖': 'cover',
+  '罒': 'net', '攵': 'strike', '彳': 'step', '疒': 'sickness', '广': 'house on a cliff', '糹': 'thread', '纟': 'thread', '釒': 'metal',
+  '飠': 'food', '訁': 'words', '𧾷': 'foot', '⻊': 'foot', '牜': 'cow', '⺌': 'small', '⺍': 'small', '丷': 'horns', '癶': 'footsteps',
+  '耂': 'old', '卩': 'seal', '⺈': 'knife', '爫': 'claw', '⺧': 'cow', '⺮': 'bamboo', '𥫗': 'bamboo', '⺶': 'sheep', '⺷': 'sheep',
+  '⻗': 'rain', '⺤': 'claw', '⺊': 'divination', '亠': 'lid', '勹': 'wrap', '彡': 'hair / shape', '夂': 'go slowly', '廴': 'stretch',
+  '冂': 'upside-down box', '匚': 'box', '厂': 'cliff', '尸': 'flag / corpse', '豸': 'badger', '隹': 'small bird', '殳': 'weapon',
+  '丶': 'dot', '丿': 'slash', '乚': 'hook', '亅': 'barb', '丨': 'line', '乙': 'second', '𠂉': 'gun', '龴': 'nose', '龶': 'life',
+};
+const cleanMeaning = (m) => m.replace(/^[\^!]/, '').replace(/\s*radical\s*\(no\.?\s*\d+\)/i, '').trim();
+function partMeaning(el, original) {
+  if (RADICAL_NAMES[el]) return RADICAL_NAMES[el];
+  for (const c of [el, original]) {
+    const k = c && kd[c];
+    if (k) { const m = [...(k.wk_meanings || []), ...k.meanings].map(cleanMeaning).filter(Boolean)[0]; if (m) return m === 'I' ? m : m.toLowerCase(); }
+  }
+  return '';
+}
+function componentsOf(ch) {
+  const f = path.join(RAW, 'kanjivg', 'kanji', ch.codePointAt(0).toString(16).padStart(5, '0') + '.svg');
+  if (!fs.existsSync(f)) return [];
+  const svg = fs.readFileSync(f, 'utf8');
+  const out = [];
+  let depth = 0, rootDepth = -1;
+  for (const m of svg.matchAll(/<g\b([^>]*)>|<\/g>/g)) {
+    if (m[0] === '</g>') { depth--; if (depth < rootDepth) rootDepth = -1; continue; }
+    depth++;
+    const el = (m[1].match(/kvg:element="([^"]+)"/) || [])[1];
+    const original = (m[1].match(/kvg:original="([^"]+)"/) || [])[1];
+    if (rootDepth < 0 && el === ch) { rootDepth = depth; continue; }
+    if (rootDepth > 0 && depth === rootDepth + 1 && el && el !== ch && !out.some((o) => o[0] === el)) out.push([el, partMeaning(el, original)]);
+  }
+  return out.length > 1 ? out : [];
+}
 
 const kanjiLevel = {};
 let lvl = 4;
@@ -95,7 +138,7 @@ for (const chunk of chunks) {
     // readings WaniKani marks as primary (no leading "!")... use them to order display
     items.push({
       id: 'k:' + c, t: 'kanji', c, lvl, jlpt: v.jlpt_new, strokes: v.strokes,
-      meanings, on, kun,
+      meanings, on, kun, parts: componentsOf(c),
     });
   }
   lvl++;
@@ -149,19 +192,85 @@ for (const w of jm.words) {
   }
 }
 
+// Kana-only words (no kanji form in the JLPT list), keyed by kana
+const jmKana = new Map();
+for (const w of jm.words) {
+  if (w.kanji.length) continue;
+  const glosses = w.sense.slice(0, 3).flatMap((s) => s.gloss.map((g) => g.text));
+  for (const r of w.kana) if (!jmKana.has(r.text)) jmKana.set(r.text, { gloss: glosses, common: r.common });
+}
+const kanaVocabRaw = new Map();
+const realReadings = commonReadings(jm);
+
+// Other common readings JMdict gives for the same word (愛想: あいそう and あいそ), accepted as answers too.
+// Only readings JMdict marks common, and none for single-kanji words, so 上 doesn't accept じょう.
+const jmReadings = new Map(); // kanji form → [[kana, …] per JMdict entry]
+for (const w of jm.words) {
+  for (const k of w.kanji) {
+    const rs = w.kana.filter((r) => (r.appliesToKanji.includes('*') || r.appliesToKanji.includes(k.text)) && r.common && !r.tags.some((t) => ['ok', 'ik', 'rk', 'sk'].includes(t)))
+      .map((r) => kataToHira(r.text));
+    if (!jmReadings.has(k.text)) jmReadings.set(k.text, []);
+    jmReadings.get(k.text).push(rs);
+  }
+}
+// Rows in the JLPT lists whose reading is wrong for the spelling we keep
+// Phrase readings checked by hand: Tatoeba id → { token: [reading, other accepted readings…] }.
+// Overrides the tokenizer where it picked the wrong one of a word's readings.
+const PHRASE_READINGS = {
+  148096: { 都: ['みやこ'] },             // 住めば都
+  179710: { 金: ['かね'] },               // 金より体
+  126918: { 金: ['かね'] },               // 地獄の沙汰も金次第
+  11871069: { 辛: ['から'] },             // 辛すぎた (too spicy)
+  12003557: { 辛: ['から'] },             // 辛すぎる (too spicy)
+  724651: { 脅かす: ['おどかす', 'おびやかす'] },
+  11851995: { 朝: ['あさ'] },             // 朝型人間
+  85365: { 表: ['おもて'] },              // 表か裏か
+  173522: { 甲: ['こう'] },               // 甲の薬は乙の毒
+  173524: { 甲: ['こう'] },               // 甲の食物は乙の毒
+  11135133: { 空: ['から'] },             // 缶は空よ
+  114404: { 奴: ['やつ'] },               // 嫌な奴
+  78427: { 後: ['のち', 'あと'] },        // 嵐の後には凪が来る
+  187711: { 何: ['なん'] },               // 何の用だ
+  10993184: { 開け: ['ひらけ'] },         // 扉よ開け
+};
+
+const READING_FIXES = {
+  伯父: ['おじ'], // row is "伯父; 叔父さん → おじさん"; the さん belongs to the second spelling
+  副: ['ふく'],   // listed as とりわけ
+};
+
 const vocabRaw = new Map();
 for (const n of [5, 4, 3, 2, 1]) {
   const rows = parseCSV(fs.readFileSync(path.join(RAW, `n${n}.csv`), 'utf8')).slice(1);
   for (const [expr, reading, meaning] of rows) {
     if (!expr || !reading || !meaning) continue;
-    const e = expr.trim();
-    if (vocabRaw.has(e)) continue;
+    const e = expr.split(/[;；、]/)[0].trim(); // "川; 河" lists alternative spellings: keep the first
     const chars = [...e];
     const kan = [...new Set(chars.filter(isKanji))];
+    if (!kan.length && /^[\u3041-\u309f\u30a1-\u30faー]{2,}$/.test(e) && !kanaVocabRaw.has(e)) {
+      const meanings = splitMeanings(meaning);
+      const jmE = jmKana.get(e);
+      const alt = jmE ? jmE.gloss.filter((g) => !meanings.some((m) => m.toLowerCase() === g.toLowerCase())) : [];
+      kanaVocabRaw.set(e, { c: e, r: [kataToHira(e)], meanings, alt, kanji: [], jlpt: n, common: jmE ? jmE.common : false });
+      continue;
+    }
     if (!kan.length || !kan.every((k) => kanjiSet.has(k))) continue;
     if (/[a-zA-Z0-9０-９～〜・()（）]/.test(e)) continue;
-    const readings = reading.replace(/\s*[（(][^)）]*[)）]/g, '').split(/[;、,／/]/).map((r) => kataToHira(r.trim())).filter((r) => /^[ぁ-ゟー]+$/.test(r));
+    let readings = reading.replace(/\s*[（(][^)）]*[)）]/g, '').split(/[;、,／/]/).map((r) => kataToHira(r.trim())).filter((r) => /^[ぁ-ゟー]+$/.test(r))
+      // する-nouns are sometimes listed as "にゅうがくする" for 入学; the word itself is just にゅうがく
+      .map((r) => (!e.endsWith('する') && r.endsWith('する') && r.length > 2 ? r.slice(0, -2) : r));
+    if (READING_FIXES[e]) readings = READING_FIXES[e];
     if (!readings.length) continue;
+    // A word listed twice with different readings (執着: しゅうじゃく, しゅうちゃく) keeps both
+    if (vocabRaw.has(e)) {
+      const v = vocabRaw.get(e);
+      for (const r of readings) if (!v.r.includes(r)) v.r.push(r);
+      continue;
+    }
+    // Add JMdict's other readings for the same entry
+    if (chars.length > 1) for (const rs of jmReadings.get(e) || []) {
+      if (rs.includes(readings[0])) for (const r of rs) if (!readings.includes(r)) readings.push(r);
+    }
     const meanings = splitMeanings(meaning);
     const jmE = jmIndex.get(e + '|' + readings[0]) || jmIndex.get(e + '|' + hiraToKata(readings[0]));
     const alt = jmE ? jmE.gloss.filter((g) => !meanings.some((m) => m.toLowerCase() === g.toLowerCase())) : [];
@@ -187,6 +296,15 @@ for (const v of vocab) {
   items.push({ id: 'v:' + v.c, t: 'vocab', c: v.c, lvl: v.lvl, jlpt: v.jlpt, r: v.r, meanings: v.meanings, alt: v.alt.slice(0, 8), kanji: v.kanji });
 }
 console.log('vocab:', vocab.length, 'of', vocabRaw.size, 'candidates');
+
+// Spread kana-only words evenly over the kanji levels in JLPT order (~10 per level), common words first
+const kanaVocab = [...kanaVocabRaw.values()].sort((a, b) => (b.jlpt - a.jlpt) || (b.common - a.common) || (a.c.length - b.c.length));
+const firstKanjiLevel = 4, lastLevel = lvl - 1;
+kanaVocab.forEach((v, i) => {
+  v.lvl = firstKanjiLevel + Math.floor((i * (lastLevel - firstKanjiLevel + 1)) / kanaVocab.length);
+  items.push({ id: 'v:' + v.c, t: 'vocab', c: v.c, lvl: v.lvl, jlpt: v.jlpt, r: v.r, meanings: v.meanings, alt: v.alt.slice(0, 8), kanji: [] });
+});
+console.log('kana-only vocab:', kanaVocab.length);
 
 // ---------------------------------------------------------------- sentences
 function loadTsv(file) {
@@ -234,6 +352,26 @@ kuromoji.builder({ dicPath: path.join(__dirname, '..', 'node_modules', 'kuromoji
       }
     }
     if (!ok || words === 0) continue;
+    // Same check as the example sentences: a whole multi-kanji word the tokenizer misread gets its own
+    // reading. If the tokenizer's reading is also a real one (昨夜: さくや / ゆうべ), accept both.
+    tokens.forEach((tk, i) => {
+      const v = vocabByExpr.get(tk[0]);
+      if (!v || readingMatches(tk[0], tk[1], v)) return;
+      if (!canFixReading(v.c, (tokens[i - 1] || [''])[0].slice(-1), (tokens[i + 1] || [''])[0].slice(0, 1))) return;
+      if (realReadings.get(v.c)?.has(tk[1])) { tk[2] = tk[2] || 0; tk[3] = [v.r[0]]; }
+      else tk[1] = v.r[0];
+    });
+    // A word taught with several readings (本当: ほんとう / ほんと) accepts any of them
+    for (const tk of tokens) {
+      const v = vocabByExpr.get(tk[0]);
+      if (v && v.r.length > 1 && v.r.includes(tk[1])) { tk[2] = tk[2] || 0; tk[3] = [...new Set([...(tk[3] || []), ...v.r.filter((r) => r !== tk[1])])]; }
+    }
+    for (const [surface, [reading, ...alts]] of Object.entries(PHRASE_READINGS[s.id] || {})) {
+      const tk = tokens.find((t) => t[0] === surface);
+      if (!tk) { console.warn(`PHRASE_READINGS ${s.id}: no token ${surface}`); continue; }
+      tk[1] = reading;
+      if (alts.length) { tk[2] = tk[2] || 0; tk[3] = alts; } else tk.length = Math.min(tk.length, 3);
+    }
     // Require most kanji words to be studied vocab so the sentence is readable
     if (known / words < 0.75) continue;
     const score = known / words * 10 - s.text.length * 0.2 + (s.en.length < 60 ? 1 : -3);
@@ -258,7 +396,8 @@ kuromoji.builder({ dicPath: path.join(__dirname, '..', 'node_modules', 'kuromoji
 
   // ---------------------------------------------------------------- strokes
   const strokes = {};
-  for (const c of kanjiSet) {
+  const kanaChars = items.filter((it) => it.t === 'kana' && [...it.c].length === 1).map((it) => it.c);
+  for (const c of [...kanjiSet, ...kanaChars]) {
     const f = path.join(RAW, 'kanjivg', 'kanji', c.codePointAt(0).toString(16).padStart(5, '0') + '.svg');
     if (!fs.existsSync(f)) continue;
     const svg = fs.readFileSync(f, 'utf8');

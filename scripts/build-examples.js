@@ -5,12 +5,16 @@
 const fs = require('fs');
 const path = require('path');
 const kuromoji = require('kuromoji');
+const { readingMatches, canFixReading, commonReadings } = require('./reading-check');
 
 const RAW = path.join(__dirname, '..', 'raw');
 const OUT = path.join(__dirname, '..', 'app', 'data');
 const EXAMPLES_PER_VOCAB = 5;
 const WORDS_PER_KANJI = 5;
 const MAX_LEN = 28;
+
+const jm = JSON.parse(fs.readFileSync(path.join(RAW, fs.readdirSync(RAW).find((f) => f.startsWith('jmdict-eng'))), 'utf8'));
+const realReadings = commonReadings(jm);
 
 global.window = {};
 require(path.join(OUT, 'data.js'));
@@ -94,6 +98,25 @@ kuromoji.builder({ dicPath: path.join(__dirname, '..', 'node_modules', 'kuromoji
   const outSentences = [];
   const outVocab = {};
   const norm = (t) => t.replace(/[。、！？!?「」『』…\s]/g, '');
+  // Display tokens per sentence ([surface, reading?]), built once and shared by every word that uses the sentence
+  const tokenCache = new Map();
+  const tokensOf = (si) => {
+    if (!tokenCache.has(si)) tokenCache.set(si, tokenizer.tokenize(corpus[si].text).map((tk) => {
+      const hasK = [...tk.surface_form].some(isKanji);
+      const r = hasK && tk.reading && tk.reading !== '*' ? kataToHira(tk.reading) : '';
+      return r ? [tk.surface_form, r] : [tk.surface_form];
+    }));
+    return tokenCache.get(si);
+  };
+  // Fixing a misread word can merge several tokens into one (明後/日 → 明後日), which shifts later token
+  // indices; merges[si] records that so match positions found earlier still point at the right tokens
+  const merges = new Map();   // corpus index → [{ at, n }] (n tokens after `at` were removed)
+  const refs = new Map();     // corpus index → chosen [outIdx, i0, i1] entries already pointing into it
+  const shift = (si, i) => {
+    for (const { at, n } of merges.get(si) || []) i = i > at + n ? i - n : i > at ? at : i;
+    return i;
+  };
+  let fixedReadings = 0, droppedMatches = 0;
   for (const v of vocab) {
     const list = (matches.get(v.c) || []).sort((a, b) => a.score - b.score);
     const chosen = [];
@@ -102,28 +125,47 @@ kuromoji.builder({ dicPath: path.join(__dirname, '..', 'node_modules', 'kuromoji
       if (chosen.length >= EXAMPLES_PER_VOCAB) break;
       const t = norm(corpus[m.si].text);
       if (seen.some((x) => x === t || x.slice(0, 5) === t.slice(0, 5))) continue;
+      const tokens = tokensOf(m.si);
+      const i0 = shift(m.si, m.i0);
+      let i1 = shift(m.si, m.i1);
+      const span = tokens.slice(i0, i1 + 1);
+      const surface = span.map((tk) => tk[0]).join('');
+      const reading = span.map((tk) => tk[1] || tk[0]).join('');
+      if (!readingMatches(surface, reading, v)) {
+        // Exactly this word, read wrong → use the word's own reading (see canFixReading). Skip the sentence
+        // for this word instead when it's a different word containing these characters (大家 in 大家族), a
+        // reading we can't be sure of, or a same-spelling word with its own real reading (一月: いちがつ
+        // "January" vs ひとつき "one month")
+        const before = (tokens[i0 - 1] || [''])[0].slice(-1), after = (tokens[i1 + 1] || [''])[0].slice(0, 1);
+        if (surface !== v.c || !canFixReading(v.c, before, after) || realReadings.get(v.c)?.has(reading)) { droppedMatches++; continue; }
+        tokens.splice(i0, span.length, [v.c, kataToHira(v.r[0])]);
+        i1 = i0;
+        if (span.length > 1) {
+          const n = span.length - 1;
+          if (!merges.has(m.si)) merges.set(m.si, []);
+          merges.get(m.si).push({ at: i0, n });
+          for (const ref of refs.get(m.si) || []) for (const k of [1, 2]) ref[k] = ref[k] > i0 + n ? ref[k] - n : ref[k] > i0 ? i0 : ref[k];
+        }
+        fixedReadings++;
+      }
       seen.push(t);
       if (!usedSentences.has(m.si)) {
-        const s = corpus[m.si];
-        const tokens = tokenizer.tokenize(s.text).map((tk) => {
-          const hasK = [...tk.surface_form].some(isKanji);
-          const r = hasK && tk.reading && tk.reading !== '*' ? kataToHira(tk.reading) : '';
-          return r ? [tk.surface_form, r] : [tk.surface_form];
-        });
         usedSentences.set(m.si, outSentences.length);
-        outSentences.push([tokens, s.en, +s.id]);
+        outSentences.push([tokens, corpus[m.si].en, +corpus[m.si].id]);
       }
-      chosen.push([usedSentences.get(m.si), m.i0, m.i1]);
+      const ref = [usedSentences.get(m.si), i0, i1];
+      if (!refs.has(m.si)) refs.set(m.si, []);
+      refs.get(m.si).push(ref);
+      chosen.push(ref);
     }
     if (chosen.length) outVocab[v.c] = chosen;
   }
+  console.log(`example readings fixed: ${fixedReadings} · matches skipped (different word): ${droppedMatches}`);
   const covered = Object.keys(outVocab).length;
   const five = Object.values(outVocab).filter((l) => l.length >= 5).length;
   console.log(`vocab with examples: ${covered}/${vocab.length} (${five} with 5) · sentences stored: ${outSentences.length}`);
 
   // ---------------------------------------------------------------- common words per kanji
-  const jmFile = fs.readdirSync(RAW).find((f) => f.startsWith('jmdict-eng'));
-  const jm = JSON.parse(fs.readFileSync(path.join(RAW, jmFile), 'utf8'));
   const candidates = new Map(); // word → { r, m }
   for (const w of jm.words) {
     for (const k of w.kanji) {
