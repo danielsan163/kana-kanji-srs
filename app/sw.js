@@ -40,13 +40,15 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch {}
-  e.waitUntil(self.registration.showNotification(d.title || 'Reviews ready', {
+  // Number badge on the Home Screen icon, so it's there even if you swipe the alert away
+  const badge = d.count > 0 && self.navigator.setAppBadge ? self.navigator.setAppBadge(d.count).catch(() => {}) : Promise.resolve();
+  e.waitUntil(badge.then(() => self.registration.showNotification(d.title || 'Reviews ready', {
     body: d.body || 'Tap to start your reviews.',
     tag: 'reviews', // a newer alert replaces the old one
     icon: 'icons/icon-192.png',
     badge: 'icons/icon-192.png',
     data: { view: 'reviews' },
-  }));
+  })));
 });
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();

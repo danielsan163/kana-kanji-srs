@@ -8,6 +8,8 @@
   - **Retro consoles:** NES (dark grey and red), SNES (light grey and purple) and SFC (Super Famicom grey with red, yellow, blue and green). Headings, buttons and tabs use the Press Start 2P pixel font, with a switch to turn it off. Japanese study text keeps your normal font.
   - Dark, Light and Match system are still there.
 
+- **Review count on the iPhone icon.** The Home Screen icon shows a number badge with your waiting reviews. Review alerts set it, and it updates while the app is open. Needs review alerts turned on.
+
 ### Changed
 - **The iPhone version's offline copy repairs itself** if something clears it, such as another site on the same github.io address.
 - **Fixed (iPhone): the question card no longer slides under the camera island** when the keyboard opens. The app fits itself above the keyboard, with a slightly smaller card and the tab bar hidden while you type.
