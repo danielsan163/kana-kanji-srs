@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1 (unreleased)
+
+### Fixed
+- **Fixed (iPhone): the lesson buttons sat too high** while scrolling, with part of the page showing underneath them. They now rest right on top of the tab bar, and drop back into the page while you type a note.
+
 ## 1.2.0 (November 16, 2026)
 
 ### New
