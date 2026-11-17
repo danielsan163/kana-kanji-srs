@@ -6,10 +6,11 @@
   "scripts": {
     "start": "electron .",
     "build-data": "node scripts/build-data.js && node scripts/build-examples.js",
-    "test": "node test/grading.test.js && node test/sync.test.js",
+    "test": "node test/grading.test.js && node test/sync.test.js && node test/primary-readings.test.js",
     "dist": "electron-builder --win",
     "build-web": "node scripts/build-web.js",
-    "serve-web": "node scripts/build-web.js && node scripts/serve-web.js"
+    "serve-web": "node scripts/build-web.js && node scripts/serve-web.js",
+    "primary-readings": "node scripts/primary-readings.js"
   },
   "keywords": [
     "japanese",

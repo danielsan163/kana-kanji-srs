@@ -5,7 +5,7 @@ const CACHE = 'kks-' + BUILD;
 const PRECACHE = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'version.json', 'CHANGELOG.md',
   'js/kana.js', 'js/web-api.js', 'js/srs.js', 'js/sync.js', 'js/app.js',
-  'data/data.js', 'data/strokes.json', 'data/examples.json',
+  'data/data.js', 'data/primary-readings.js', 'data/strokes.json', 'data/examples.json',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'fonts/klee-one.css',
   'fonts/pixel.css', 'fonts/press-start-2p.woff2',
 ];
