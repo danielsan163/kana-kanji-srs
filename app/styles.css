@@ -376,8 +376,10 @@ mark.hl { background: none; color: var(--vocab-hl); font-weight: 700; border-bot
   .prompt-bar { font-size: 16px; padding: 10px; }
   .answer { font-size: 22px; padding: 12px 48px; }
   .quiz-actions .btn { flex: 1 1 auto; }
-  .lesson-nav { flex-wrap: nowrap; gap: 8px; position: sticky; bottom: calc(60px + env(safe-area-inset-bottom)); z-index: 5;
-    background: var(--bg); padding: 10px 0; margin: 8px 0 0; box-shadow: 0 -10px 12px -6px var(--bg); }
+  /* Sticky offsets count from inside main's bottom padding (76px + safe area), which is 23px taller than
+     the tab bar (53px + safe area): -23px puts the buttons right on top of the tab bar */
+  .lesson-nav { flex-wrap: nowrap; gap: 8px; position: sticky; bottom: -23px; z-index: 5;
+    background: var(--bg); padding: 10px 0; margin: 8px 0 -23px; box-shadow: 0 -10px 12px -6px var(--bg); } /* same -23px at the end of the page */
   .lesson-nav .btn { flex: 1 1 0; padding: 11px 6px; font-size: 14px; }
   .lesson-strip { gap: 4px; }
 
@@ -501,6 +503,7 @@ mark.hl { background: none; color: var(--vocab-hl); font-weight: 700; border-bot
 @media (max-width: 700px) {
   body.kb-open nav { display: none; }
   body.kb-open main { padding-bottom: 12px; }
+  body.kb-open .lesson-nav { position: static; margin-bottom: 0; } /* typing a note: no tab bar to sit on, so stay at the end of the page */
   body.kb-open .topbar { padding-top: calc(4px + env(safe-area-inset-top)); padding-bottom: 4px; }
   body.kb-open .quiz-top { margin-bottom: 6px; }
   body.kb-open .subject { min-height: 0; padding: 12px; }
