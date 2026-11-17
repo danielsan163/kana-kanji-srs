@@ -135,6 +135,9 @@
   }
   const sentenceHTML = (it, withFuri) => it.tokens.map(([s, r]) => (withFuri ? furigana(s, r) : esc(s))).join('');
   const kunHTML = (k) => { const [a, b] = k.split('.'); return esc(a) + (b ? `<span class="oku">${esc(b)}</span>` : ''); };
+  // Highlight a kanji's primary reading(s) on the info card (kun'yomi match by stem: い.きる for primary い)
+  const markPrimary = (it, type, reading, html) =>
+    (it.primary_readings || []).some((p) => p.type === type && p.reading === reading) ? `<b class="primary-reading">${html}</b>` : html;
 
   function stageChip(it) {
     const s = SRS.stageOf(it.id);
@@ -237,7 +240,7 @@
   function sentencesWithVocab(v) { return SRS.items.filter((s) => s.t === 'sentence' && s.words.includes(v.c)).slice(0, 4); }
   const vocabInSentence = (s) => s.words.map((w) => SRS.byId.get('v:' + w)).filter(Boolean);
   function rowFor(it) {
-    const reading = it.t === 'vocab' ? it.r[0] : it.t === 'kanji' ? (it.on[0] || '') : '';
+    const reading = it.t === 'vocab' ? it.r[0] : it.t === 'kanji' ? (it.primary_readings ? SRS.primaryDisplay(it, it.primary_readings[0]) : it.on[0] || '') : '';
     return `<div class="list-row" data-item="${esc(it.id)}"><span class="w">${esc(it.t === 'sentence' ? it.c : it.c)}</span>
       ${it.t !== 'sentence' ? `<span class="r">${esc(reading)}</span>` : ''}<span class="m">${esc(it.t === 'sentence' ? it.en : shortMeaning(it))}</span>${stageChip(it)}</div>`;
   }
@@ -257,8 +260,9 @@
     } else if (it.t === 'kanji') {
       main.push(`<dl class="kv"><dt>Meaning</dt><dd><span class="primary-meaning">${esc(it.meanings[0])}</span>
           ${it.meanings.length > 1 ? `<div class="muted">${esc(it.meanings.slice(1).join(', '))}</div>` : ''}</dd>
-        <dt>On'yomi</dt><dd class="readings">${it.on.length ? esc(it.on.join('、')) : '<span class="faint">none</span>'}</dd>
-        <dt>Kun'yomi</dt><dd class="readings">${it.kun.length ? it.kun.map(kunHTML).join('、') : '<span class="faint">none</span>'}</dd>
+        <dt>On'yomi</dt><dd class="readings">${it.on.length ? it.on.map((r) => markPrimary(it, 'on', r, esc(r))).join('、') : '<span class="faint">none</span>'}</dd>
+        <dt>Kun'yomi</dt><dd class="readings">${it.kun.length ? it.kun.map((k) => markPrimary(it, 'kun', k.split('.')[0], kunHTML(k))).join('、') : '<span class="faint">none</span>'}</dd>
+        ${it.primary_readings ? `<dt></dt><dd class="faint primary-note">Reviews ask for the <b class="primary-reading">highlighted</b> reading${it.primary_readings.length > 1 ? 's' : ''}. The others come up in vocab.</dd>` : ''}
         <dt>Audio</dt><dd>${audioBtn(SRS.speechText(it))}</dd>
         ${it.parts && it.parts.length ? `<dt>Parts</dt><dd class="parts">${it.parts.map(([el, m]) => {
           const k = SRS.byId.get('k:' + el);
@@ -694,12 +698,18 @@
     reading: { label: 'Reading', cls: 'reading' },
     on: { label: "On'yomi", cls: 'reading', hint: 'katakana' },
     kun: { label: "Kun'yomi", cls: 'reading', hint: 'hiragana' },
+    on2: { label: "On'yomi", cls: 'reading', hint: 'katakana' },
+    kun2: { label: "Kun'yomi", cls: 'reading', hint: 'hiragana' },
     translate: { label: 'Meaning', cls: 'meaning', hint: 'think it through, then check' },
   };
+  const KANJI_READING = ['on', 'kun', 'on2', 'kun2'];
   function promptLabel(it, prompt) {
     const info = PROMPT_INFO[prompt];
     let hint = info.hint;
     if (prompt === 'reading') hint = it.t === 'kana' ? 'type in romaji' : it.t === 'sentence' ? 'type the whole phrase in kana' : 'kana';
+    // Two primary readings of the same type: each prompt takes either one, once
+    const type = prompt.replace('2', '');
+    if (KANJI_READING.includes(prompt) && (it.primary_readings || []).filter((p) => p.type === type).length > 1) hint += ', one of two';
     return `${it.t === 'kanji' ? 'Kanji' : TYPE_LABEL[it.t]} <b>${info.label}</b>${hint ? `<span class="hint">(${hint})</span>` : ''}`;
   }
 
@@ -725,7 +735,7 @@
     function fill() {
       while (!wrapUp && active.length < ACTIVE_MAX && pending.length) {
         const it = pending.shift();
-        active.push({ it, prompts: SRS.promptsFor(it), wrong: 0, readingDone: false });
+        active.push({ it, prompts: SRS.promptsFor(it), wrong: 0, readingDone: false, used: [] });
       }
     }
     function next() {
@@ -766,7 +776,7 @@
               ${phase === 'selfgrade' ? `<div class="row"><button class="btn" id="got" style="border-color:var(--ok)">I understood it <span class="kbd">1</span></button>
                 <button class="btn" id="missed" style="border-color:var(--bad)">I missed it <span class="kbd">2</span></button></div>` : ''}`}
           </div>`
-        : `<div class="answer-row"><input class="answer" id="answer" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="${prompt === 'meaning' ? 'Your answer' : prompt === 'on' ? '答え (katakana)' : it.t === 'kana' ? 'romaji' : '答え'}">
+        : `<div class="answer-row"><input class="answer" id="answer" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="${prompt === 'meaning' ? 'Your answer' : prompt === 'on' || prompt === 'on2' ? '答え (katakana)' : it.t === 'kana' ? 'romaji' : '答え'}">
           <button class="answer-submit" id="submit" title="Submit (Enter)">➜</button></div>`}
         <div class="quiz-msg" id="msg">${esc(message)}</div>
         <div class="quiz-actions" id="actions"></div>
@@ -786,8 +796,8 @@
         return;
       }
       const input = $('#answer');
-      const kanaMode = (prompt === 'reading' && it.t !== 'kana') || prompt === 'on' || prompt === 'kun';
-      const katakana = prompt === 'on';
+      const kanaMode = (prompt === 'reading' && it.t !== 'kana') || KANJI_READING.includes(prompt);
+      const katakana = prompt === 'on' || prompt === 'on2';
       input.addEventListener('input', (e) => {
         if (!kanaMode || e.isComposing) return;
         const v = toKana(input.value, { katakana });
@@ -815,9 +825,9 @@
       if (phase !== 'answer') return;
       const input = $('#answer');
       const { st, prompt } = cur;
-      const kanaMode = (prompt === 'reading' && st.it.t !== 'kana') || prompt === 'on' || prompt === 'kun';
-      if (kanaMode) input.value = toKana(input.value, { katakana: prompt === 'on', final: true });
-      const g = SRS.grade(st.it, prompt, input.value);
+      const kanaMode = (prompt === 'reading' && st.it.t !== 'kana') || KANJI_READING.includes(prompt);
+      if (kanaMode) input.value = toKana(input.value, { katakana: prompt === 'on' || prompt === 'on2', final: true });
+      const g = SRS.grade(st.it, prompt, input.value, { used: st.used });
       if (g.result === 'retry') {
         input.classList.remove('shake'); void input.offsetWidth; input.classList.add('shake');
         $('#msg').textContent = g.message || '';
@@ -830,6 +840,7 @@
         correctAnswers++;
         input.classList.add('correct');
         st.prompts = st.prompts.filter((p) => p !== prompt);
+        if (g.primary) st.used.push(g.primary);
         if (prompt === 'reading') st.readingDone = true;
         lastWasWrong = false;
         $('#msg').textContent = g.close ? g.message : '';

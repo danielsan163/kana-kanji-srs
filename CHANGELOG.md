@@ -9,6 +9,7 @@
   - Dark, Light and Match system are still there.
 
 ### Changed
+- **Kanji reviews ask for the main reading only.** Each kanji has one primary reading, or two when both are very common (人: ジン and ニン). They were picked by how often each reading appears in common words. The info card still lists every reading, with the primary ones underlined, and the others are learned through vocab. Typing one of the other readings gives a gentle retry instead of a wrong answer. Your progress isn't affected.
 - **The iPhone version's offline copy repairs itself** if something clears it, such as another site on the same github.io address.
 - **Fixed (iPhone): the question card no longer slides under the camera island** when the keyboard opens. The app fits itself above the keyboard, with a slightly smaller card and the tab bar hidden while you type.
 - **iPhone updates arrive reliably.** The app checks for a new version every time it comes to the front, not only on a fresh start, and always asks the server rather than a cached copy.

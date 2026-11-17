@@ -62,6 +62,16 @@ The raw sources live in `raw/` and are not included in the installer.
 
 Note: this resets content only. Progress is keyed by the item's text, so it survives a rebuild.
 
+### Primary readings
+
+Kanji reviews ask for each kanji's one or two primary readings. The info card still lists every reading, and the others are learned through vocab.
+
+1. Put `kanjidic2.xml` (KANJIDIC2, EDRDG), the jmdict-eng-common JSON and `ja-wordfreq.tsv` in `raw/`. Make the last one by copying `wordfreq/data/large_ja.msgpack.gz` out of the wordfreq wheel from PyPI (it's a zip; wordfreq data is CC BY-SA 4.0) into `raw/` and running `node scripts/export-wordfreq.js`.
+2. `npm run primary-readings` writes `scripts/primary-readings/derived.json` and `doubles.csv` (the kanji with two primary readings, with example words) for review. `-- --threshold 0.3` changes how close the second reading must be to count.
+3. `npm run primary-readings -- --apply` writes `app/data/primary-readings.js`.
+
+To change a kanji by hand, add it to `scripts/primary-readings/overrides.json` and run `--apply` again. The script never writes that file.
+
 ## Web version and sync
 
 - `npm run build-web` builds the web / iPhone version into `web-dist/`; `npm run serve-web` builds and serves it on http://localhost:5173 (add `-- --lan` to reach it from a phone on the same Wi-Fi).

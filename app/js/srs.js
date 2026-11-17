@@ -5,6 +5,10 @@
 
   // ------------------------------------------------------------------ content index
   const byId = new Map(items.map((it, i) => [it.id, Object.assign(it, { idx: i })]));
+  // Primary readings (app/data/primary-readings.js): the one or two readings a kanji review asks for.
+  // A kanji without an entry keeps the old behaviour (any on'yomi / any kun'yomi).
+  const PRIMARY = window.SRS_PRIMARY || {};
+  for (const it of items) if (it.t === 'kanji' && PRIMARY[it.c] && PRIMARY[it.c].length) it.primary_readings = PRIMARY[it.c];
   const byLevel = new Map(levels.map((l) => [l.n, []]));
   for (const it of items) byLevel.get(it.lvl).push(it);
   const vocabByKanji = new Map();
@@ -356,7 +360,13 @@
   function promptsFor(it) {
     switch (it.t) {
       case 'kana': return ['reading'];
-      case 'kanji': return ['meaning', ...(hasOn(it) ? ['on'] : []), ...(hasKun(it) ? ['kun'] : [])];
+      case 'kanji': {
+        if (!it.primary_readings) return ['meaning', ...(hasOn(it) ? ['on'] : []), ...(hasKun(it) ? ['kun'] : [])];
+        // One prompt per primary reading; a second reading of the same type is asked as 'on2' / 'kun2'
+        const out = ['meaning'];
+        for (const p of it.primary_readings) out.push(out.includes(p.type) ? p.type + '2' : p.type);
+        return out;
+      }
       case 'vocab': return it.kanji.length ? ['meaning', 'reading'] : ['meaning']; // kana-only words show their reading
       case 'sentence': return ['reading', 'translate'];
       default: return [];
@@ -405,12 +415,23 @@
     const [stem, oku] = k.split('.');
     return oku ? [stem, stem + oku] : [stem];
   }
+  // Answers that count as one primary reading: an on'yomi as is, a kun'yomi stem with any of its okurigana (い → い, いきる, いかす…)
+  function primaryForms(it, p) {
+    if (p.type === 'on') return [normKana(p.reading)];
+    return [...new Set([p.reading, ...it.kun.filter((k) => k.split('.')[0] === p.reading).flatMap(kunForms)])].map((r) => normKana(r));
+  }
+  /** On'yomi in katakana; kun'yomi as its first full form (い → い.きる) so it reads like the info card. */
+  function primaryDisplay(it, p) {
+    return p.type === 'on' ? p.reading : it.kun.find((k) => k.split('.')[0] === p.reading) || p.reading;
+  }
 
   /**
-   * Grade an answer. Returns { result: 'correct'|'wrong'|'retry', close?, message? }
+   * Grade an answer. Returns { result: 'correct'|'wrong'|'retry', close?, message?, primary? }
    * 'retry' = shake and let the user try again without penalty.
+   * opts.used: primary readings already answered for this item this session (for 'on2' / 'kun2');
+   * a correct kanji reading answer returns the primary reading it matched as `primary`.
    */
-  function grade(it, prompt, raw) {
+  function grade(it, prompt, raw, opts = {}) {
     const answer = raw.trim();
     if (!answer) return { result: 'retry', message: '' };
 
@@ -447,15 +468,26 @@
     const a = normKana(toKana(answer, { final: true }));
     if (!/^[぀-ゟ]+$/.test(a)) return { result: 'retry', message: 'Answer in kana (type romaji and it converts).' };
 
-    if (prompt === 'on' || prompt === 'kun') {
+    const type = prompt === 'on2' ? 'on' : prompt === 'kun2' ? 'kun' : prompt;
+    if (type === 'on' || type === 'kun') {
       const on = it.on.map((r) => normKana(r));
       const kun = it.kun.flatMap(kunForms).map((r) => normKana(r));
-      const want = prompt === 'on' ? on : kun;
-      const other = prompt === 'on' ? kun : on;
-      if (want.includes(a)) return { result: 'correct' };
-      if (other.includes(a)) {
-        return { result: 'retry', message: prompt === 'on' ? "That's a kun'yomi. We want the on'yomi." : "That's an on'yomi. We want the kun'yomi." };
+      const want = type === 'on' ? on : kun;
+      const other = type === 'on' ? kun : on;
+      const typeMsg = type === 'on' ? "That's a kun'yomi. We want the on'yomi." : "That's an on'yomi. We want the kun'yomi.";
+      if (it.primary_readings) {
+        const p = it.primary_readings.find((x) => x.type === type && primaryForms(it, x).includes(a));
+        if (p) {
+          if ((opts.used || []).includes(p.reading)) return { result: 'retry', message: 'You already gave that one. We want the other one.' };
+          return { result: 'correct', primary: p.reading };
+        }
+        // Other real readings aren't wrong, just not the one being taught yet (they come with vocab)
+        if (want.includes(a)) return { result: 'retry', message: "That's a reading of this kanji, but not the one we're looking for." };
+        if (other.includes(a)) return { result: 'retry', message: typeMsg };
+        return { result: 'wrong' };
       }
+      if (want.includes(a)) return { result: 'correct' };
+      if (other.includes(a)) return { result: 'retry', message: typeMsg };
       return { result: 'wrong' };
     }
 
@@ -500,6 +532,7 @@
   // What the TTS voice should say
   function speechText(it) {
     if (it.t === 'kana') return it.c;
+    if (it.t === 'kanji' && it.primary_readings) return it.primary_readings.map((p) => kataToHira(primaryDisplay(it, p).replace('.', ''))).join('、');
     if (it.t === 'kanji') return [...it.on.slice(0, 2).map(kataToHira), ...it.kun.slice(0, 2).map((k) => k.replace('.', ''))].join('、');
     if (it.t === 'vocab') return it.r[0];
     return spokenText(it.tokens);
@@ -615,6 +648,6 @@
     lessonQueue, lessonsLeftToday, reviewQueue, forecast, nextReviewAt, stageCounts, dayStats,
     completeLesson, completeReview, resetItem, practiceSets, leeches,
     levelUpEstimate, markKnown, startVacation, endVacation,
-    promptsFor, grade, readingsOf, sentenceReading, speechText, spokenText, kunForms, search,
+    promptsFor, grade, readingsOf, primaryDisplay, sentenceReading, speechText, spokenText, kunForms, search,
   };
 })();

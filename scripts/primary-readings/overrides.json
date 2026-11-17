@@ -1,0 +1,3 @@
+{
+  "_comment": "Hand-picked primary readings. These replace the derived ones for the kanji listed and are never overwritten. Format: \"生\": [{\"reading\": \"セイ\", \"type\": \"on\"}, {\"reading\": \"い\", \"type\": \"kun\"}]. Kun'yomi can be a stem (い) or KANJIDIC's form (い.きる). Then run: npm run primary-readings -- --apply"
+}
