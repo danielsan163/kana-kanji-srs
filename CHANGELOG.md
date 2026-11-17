@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 (unreleased)
+## 1.2.0 (November 16, 2026)
 
 ### New
 - **Themes** (Settings → Appearance). Pick from a grid of preview cards; each theme recolours the whole app, including item types and SRS stage colours. Themes are per device.
