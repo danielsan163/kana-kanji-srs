@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     const fresh = due.some(([t]) => t > since && t <= now.getTime());
     if (!ready || !fresh) continue;
 
-    const payload = JSON.stringify({ title: 'Reviews ready', body: `${ready} review${ready === 1 ? ' is' : 's are'} waiting. Tap to start.` });
+    const payload = JSON.stringify({ title: 'Reviews ready', count: ready, body: `${ready} review${ready === 1 ? ' is' : 's are'} waiting. Tap to start.` });
     for (const s of list) {
       try {
         await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, payload, { TTL: 3600 });

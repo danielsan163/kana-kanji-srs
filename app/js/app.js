@@ -63,6 +63,15 @@
     nr.textContent = reviews; nr.classList.toggle('hot', reviews > 0);
     const lvl = SRS.levels[SRS.state.level - 1];
     $('#nav-level').textContent = `Level ${lvl.n} · ${lvl.name}`;
+    setIconBadge(reviews);
+  }
+  // Number badge on the Home Screen icon (iPhone web app; needs notifications allowed)
+  let lastBadge = -1;
+  function setIconBadge(n) {
+    if (!isWeb || !navigator.setAppBadge || n === lastBadge) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    lastBadge = n;
+    (n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
   }
 
   let toastTimer;
